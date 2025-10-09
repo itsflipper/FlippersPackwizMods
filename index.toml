@@ -51,6 +51,11 @@ hash = "098d6976a738658ca490cc58e9fab19f06cd1a7b23199b6f1ee108d866333e22"
 metafile = true
 
 [[files]]
+file = "mods/forge-config-api-port.pw.toml"
+hash = "9a8c273d0efcf679d04d77ab37521c05978caff642a6c2b867d2fa2cdc8b168e"
+metafile = true
+
+[[files]]
 file = "mods/harvester-qol.pw.toml"
 hash = "a393bef344f640817ecc40bf357fbd54ff94054b8b3bdc0398c4dacb8586c8e1"
 metafile = true
