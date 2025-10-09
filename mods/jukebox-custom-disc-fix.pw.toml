@@ -1,0 +1,13 @@
+name = "Jukebox Custom Disc Fix"
+filename = "jukeboxcustomdiscfix-0.1.5-1.21.10.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/NtPNF0D7/versions/c9UWpLMq/jukeboxcustomdiscfix-0.1.5-1.21.10.jar"
+hash-format = "sha512"
+hash = "4bc7f58ae69bbbe4a73b4e2d7320133add5b5aace321c2b1da437121b5aa0c5429cea66ab2f157999ef0bfccb247a558d4032684244c19bac9cda0f47d914c6e"
+
+[update]
+[update.modrinth]
+mod-id = "NtPNF0D7"
+version = "c9UWpLMq"

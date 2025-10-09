@@ -1,0 +1,13 @@
+name = "Packwizmods"
+author = "Flipper&EyEyron"
+version = "1.0.0"
+pack-format = "packwiz:1.1.0"
+
+[index]
+file = "index.toml"
+hash-format = "sha256"
+hash = "a1e985f6200034808f2a26e47727ce3f1b35d542d44f560c7b11ed0cfc90baae"
+
+[versions]
+fabric = "0.17.2"
+minecraft = "1.21.10"
