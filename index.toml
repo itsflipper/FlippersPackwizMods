@@ -1,11 +1,6 @@
 hash-format = "sha256"
 
 [[files]]
-file = "mods/3dskinlayers.pw.toml"
-hash = "ea517969944456d1444d7ef97c85e4b75d2161663cf719f0992d5e679a56923a"
-metafile = true
-
-[[files]]
 file = "mods/chat-heads.pw.toml"
 hash = "368b538e311c20808f1914e79813285259715b6cebee22484c53be233e1e8553"
 metafile = true
@@ -56,8 +51,8 @@ hash = "098d6976a738658ca490cc58e9fab19f06cd1a7b23199b6f1ee108d866333e22"
 metafile = true
 
 [[files]]
-file = "mods/forge-config-api-port.pw.toml"
-hash = "9a8c273d0efcf679d04d77ab37521c05978caff642a6c2b867d2fa2cdc8b168e"
+file = "mods/harvester-qol.pw.toml"
+hash = "a393bef344f640817ecc40bf357fbd54ff94054b8b3bdc0398c4dacb8586c8e1"
 metafile = true
 
 [[files]]
@@ -78,11 +73,6 @@ metafile = true
 [[files]]
 file = "mods/jukebox-custom-disc-fix.pw.toml"
 hash = "e809ff830b97e417561f3eb8cb4b374ecc2b3871d47682a18184b035ce716b57"
-metafile = true
-
-[[files]]
-file = "mods/lambdynamiclights.pw.toml"
-hash = "03aeb028187b13a940b7140789a7701febaacfb8fbad9fcbd6344c197df31f7e"
 metafile = true
 
 [[files]]

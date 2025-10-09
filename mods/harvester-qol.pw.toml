@@ -1,0 +1,13 @@
+name = "Harvester"
+filename = "harvester-1.0+mc.1.21.9.jar"
+side = "server"
+
+[download]
+url = "https://cdn.modrinth.com/data/jLBC4JG7/versions/eMAepd4V/harvester-1.0%2Bmc.1.21.9.jar"
+hash-format = "sha512"
+hash = "d055a949c3eac28cda92821b872e0d02a10246f6c6032308abfa1029b4edc4547ebf1463919fd405b1e545b090e8d5c8029bb79317238963121ff5314184b644"
+
+[update]
+[update.modrinth]
+mod-id = "jLBC4JG7"
+version = "eMAepd4V"
