@@ -6,11 +6,6 @@ hash = "ea517969944456d1444d7ef97c85e4b75d2161663cf719f0992d5e679a56923a"
 metafile = true
 
 [[files]]
-file = "mods/c2me-fabric.pw.toml"
-hash = "cc6214db776bf19e920ba42ff6add6a9e61ea1e37dc8445607d40af90525c8eb"
-metafile = true
-
-[[files]]
 file = "mods/chat-heads.pw.toml"
 hash = "368b538e311c20808f1914e79813285259715b6cebee22484c53be233e1e8553"
 metafile = true
@@ -103,11 +98,6 @@ metafile = true
 [[files]]
 file = "mods/modmenu.pw.toml"
 hash = "5dd45d5fd5e1ae2bd521b93a70b83c69b57ada18f424c6562d8c6ea9980cfb3e"
-metafile = true
-
-[[files]]
-file = "mods/moonrise-opt.pw.toml"
-hash = "47bdd55765d74cc1e458cc6760a78748d637169b507051aa46065db6c9c73786"
 metafile = true
 
 [[files]]
