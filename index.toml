@@ -106,11 +106,6 @@ hash = "4762935a3ab92c3ad07f3eb43a7bb8f9997066c9f8e9c68745f286e395f7b51e"
 metafile = true
 
 [[files]]
-file = "mods/plasmo-voice.pw.toml"
-hash = "7f083dbb86ca8d9027bd66daec43d16e6850ec99496bc1bf5aad990afc3d36ee"
-metafile = true
-
-[[files]]
 file = "mods/puzzles-lib.pw.toml"
 hash = "ef08692b5b67c233b487bda4f961f0d186e871c2e759d63577d8a6ec651af3ac"
 metafile = true
@@ -118,6 +113,11 @@ metafile = true
 [[files]]
 file = "mods/servercore.pw.toml"
 hash = "a112d883056e0934ca5f7d8718f5a2c5cf9d6d63ecb7e91754ba9dcee7bb799e"
+metafile = true
+
+[[files]]
+file = "mods/simple-voice-chat.pw.toml"
+hash = "133eee6251d9ef66c02acc1e4cff77a63883add5dfd508d014d6df3b41e3f6b4"
 metafile = true
 
 [[files]]
