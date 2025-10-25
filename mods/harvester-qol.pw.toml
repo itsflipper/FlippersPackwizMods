@@ -1,13 +1,13 @@
 name = "Harvester"
-filename = "harvester-1.0+mc.1.21.9.jar"
+filename = "harvester-1.1+mc.1.21.10.jar"
 side = "server"
 
 [download]
-url = "https://cdn.modrinth.com/data/jLBC4JG7/versions/eMAepd4V/harvester-1.0%2Bmc.1.21.9.jar"
+url = "https://cdn.modrinth.com/data/jLBC4JG7/versions/yTPcEjT6/harvester-1.1%2Bmc.1.21.10.jar"
 hash-format = "sha512"
-hash = "d055a949c3eac28cda92821b872e0d02a10246f6c6032308abfa1029b4edc4547ebf1463919fd405b1e545b090e8d5c8029bb79317238963121ff5314184b644"
+hash = "385c03ff93e80f162563f07e13d62b95bdcc8ec8f5145b5ae91e5f5e75ed3d868371320eafc4b38bb6f22dd90fa7b3b67b33ac4be98781e334ecdee1d2cd9a3b"
 
 [update]
 [update.modrinth]
 mod-id = "jLBC4JG7"
-version = "eMAepd4V"
+version = "yTPcEjT6"
