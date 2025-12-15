@@ -11,6 +11,11 @@ hash = "4ee1808a7fb319d469dece5752cedb05dacb9afbe48021fa664f54b8c83fdc45"
 metafile = true
 
 [[files]]
+file = "mods/cardboard.pw.toml"
+hash = "58360269450fb1e447bb1da9830ad15f1bad1cf50a2247dc4621c0b207e493ef"
+metafile = true
+
+[[files]]
 file = "mods/chat-heads.pw.toml"
 hash = "0e073702f4562edac6258fd01f8b921628adf48fdd7e70209d93f4978753a0ce"
 metafile = true
