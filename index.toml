@@ -101,11 +101,6 @@ hash = "a077e0482f50add9ef20e962a7939aa678583cb3f354fb6b6124219badafdd4d"
 metafile = true
 
 [[files]]
-file = "mods/jukebox-custom-disc-fix.pw.toml"
-hash = "0d532172b46a51c9679cee3c7b7a6943534a8f68a5b3779df4d148726e0d5b90"
-metafile = true
-
-[[files]]
 file = "mods/leaves-be-gone.pw.toml"
 hash = "67e8124a80cfa3257826ca55bcf02e78a803c0fa91ddea815418d7255ef882a3"
 metafile = true
