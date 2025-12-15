@@ -1,0 +1,13 @@
+name = "GriefLogger"
+filename = "grieflogger-1.2.9-1.21.9-fabric.jar"
+side = "server"
+
+[download]
+url = "https://cdn.modrinth.com/data/8oGVUFuX/versions/W00iASFN/grieflogger-1.2.9-1.21.9-fabric.jar"
+hash-format = "sha512"
+hash = "fe6f3af403dc72cdab7d1642568e29983f38c2521b699cf25bf3e8d4d5eafcf2b64404a5a361afcffcc399f02c8058ac0d7775d6acea9b4ae2797a39e54927f2"
+
+[update]
+[update.modrinth]
+mod-id = "8oGVUFuX"
+version = "W00iASFN"
