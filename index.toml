@@ -141,11 +141,6 @@ hash = "a112d883056e0934ca5f7d8718f5a2c5cf9d6d63ecb7e91754ba9dcee7bb799e"
 metafile = true
 
 [[files]]
-file = "mods/simple-voice-chat.pw.toml"
-hash = "8c80e3393ce1fb38159f02af4dd3a7aba0b656945aac8c3da5aef04b22915e35"
-metafile = true
-
-[[files]]
 file = "mods/slumber.pw.toml"
 hash = "fabf3dbf6c00a57c519cb4359fbcc7fa73be6bf1477004472917263f21b7197e"
 metafile = true
