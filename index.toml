@@ -21,6 +21,11 @@ hash = "64badefe03082699f587274a31d1f0793583a4d88aac8ea2226162f80783fb52"
 metafile = true
 
 [[files]]
+file = "mods/cloth-config.pw.toml"
+hash = "717d8ac591dba59be4767a179e1359747561e54ccfcac42161fd6bf54339a78b"
+metafile = true
+
+[[files]]
 file = "mods/crashexploitfixer.pw.toml"
 hash = "eb8524b5da62bd4fcc546bd85d99375172eaa2c7613dabae5df578d573840645"
 metafile = true
@@ -81,6 +86,16 @@ hash = "d74f72f3bf13c4ef7d60b6e2defecd3c7af77ed9be7764cf1ed10ea1fd707a1f"
 metafile = true
 
 [[files]]
+file = "mods/freecam.pw.toml"
+hash = "9d12f51a932b25751b7595ca46439a30bee2c26bf6d9913ccc9a27ade1972f36"
+metafile = true
+
+[[files]]
+file = "mods/gamma-utils.pw.toml"
+hash = "cc4a12cee04af27f3ca40ebe8d9509292a35f7b944cb5892de9adfaeecae6fda"
+metafile = true
+
+[[files]]
 file = "mods/harvester-qol.pw.toml"
 hash = "53e1061633e639e6eecc5bb4846cd787b97703bab558ca6bdbb57b758f30e544"
 metafile = true
@@ -138,6 +153,11 @@ metafile = true
 [[files]]
 file = "mods/servercore.pw.toml"
 hash = "a112d883056e0934ca5f7d8718f5a2c5cf9d6d63ecb7e91754ba9dcee7bb799e"
+metafile = true
+
+[[files]]
+file = "mods/sit-datapack.pw.toml"
+hash = "130389ea15895bbbb671f5453a23ec84a7dc852d3e8c7133b699d0c7d7a99e59"
 metafile = true
 
 [[files]]
