@@ -3,11 +3,11 @@ filename = "sit-datapack-1.1.jar"
 side = "both"
 
 [download]
-url = "https://cdn.modrinth.com/data/MI2DOogd/versions/dMjjSH0K/sit-datapack-1.1.jar"
+url = "https://cdn.modrinth.com/data/MI2DOogd/versions/OHo1AJfA/sit-datapack-1.1.jar"
 hash-format = "sha512"
-hash = "cbc3d67d6543f24f413831288db9cbf96aafc0e0902bcea76f9a61509c5d676c131dd0319055c9353fe3d38b3147d67368c21ede124ee24d3f16765725203fd7"
+hash = "23ff2694da234240795548afb53d7813552ff909452cb537975f82fad83ac0fe0a626e17f69d36ddf70671f4de483c9fa3ae20a4cb71b2870f8f8f53cd1182b0"
 
 [update]
 [update.modrinth]
 mod-id = "MI2DOogd"
-version = "dMjjSH0K"
+version = "OHo1AJfA"
