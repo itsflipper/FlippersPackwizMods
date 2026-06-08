@@ -21,7 +21,7 @@ fresh_install() {
     echo "==> Cloning repo into $repo_path"
     git clone "-b" "$BRANCH"  "$REPO_URL" "$repo_path"
 
-    cd "$repo_path"
+    cd "$repo_path/gsr"
 
     echo "==> Creating symlink"
     mkdir -p "$SYSTEMD_DIR"
