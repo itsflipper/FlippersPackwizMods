@@ -4,9 +4,9 @@ set -e
 
 REPO_URL="https://github.com/itsflipper/FlippersPackwizMods.git"
 BRANCH="podman"
-CONTAINER_FILE="gcr.container"
+CONTAINER_FILE="gsr.container"
 SYSTEMD_DIR="$HOME/.config/containers/systemd"
-SERVICE_NAME="gcr"
+SERVICE_NAME="gsr"
 
 TARGET_DIR="${1:-$(pwd)}"
 
@@ -25,10 +25,10 @@ fresh_install() {
 
     echo "==> Creating symlink"
     mkdir -p "$SYSTEMD_DIR"
-    ln -s "$repo_path/$CONTAINER_FILE" "$symlink_path"
+    ln -s "$repo_path/gsr/$CONTAINER_FILE" "$symlink_path"
 
     echo "==> Building image"
-    podman build -t "$SERVICE_NAME" .
+    podman build -t "$SERVICE_NAME" "$repo_path/gsr/"
 
     echo "==> Reloading systemd"
     systemctl --user daemon-reload
