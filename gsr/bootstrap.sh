@@ -28,7 +28,7 @@ fresh_install() {
     ln -s "$repo_path/gsr/$CONTAINER_FILE" "$symlink_path"
 
     echo "==> Building image"
-    podman build -t "$SERVICE_NAME" "$repo_path/gsr/"
+    podman build -t "$SERVICE_NAME" "$repo_path/gsr"
 
     echo "==> Reloading systemd"
     systemctl --user daemon-reload
