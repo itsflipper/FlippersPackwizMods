@@ -4,14 +4,14 @@ set -e
 
 REPO_URL="https://github.com/itsflipper/FlippersPackwizMods.git"
 BRANCH="podman"
-CONTAINER_FILE="gayshitrevived.container"
+CONTAINER_FILE="gcr.container"
 SYSTEMD_DIR="$HOME/.config/containers/systemd"
-SERVICE_NAME="gayshitrevived"
+SERVICE_NAME="gcr"
 
 TARGET_DIR="${1:-$(pwd)}"
 
 symlink_path="$SYSTEMD_DIR/$CONTAINER_FILE"
-repo_path="$TARGET_DIR/gayshitrevived"
+repo_path="$TARGET_DIR/FlippersPackwizMods"
 
 is_running() {
     systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null
