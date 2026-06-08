@@ -19,7 +19,7 @@ is_running() {
 
 fresh_install() {
     echo "==> Cloning repo into $repo_path"
-    git clone "$REPO_URL" "-b" "$BRANCH" "$repo_path"
+    git clone "-b" "$BRANCH"  "$REPO_URL" "$repo_path"
 
     cd "$repo_path"
 
