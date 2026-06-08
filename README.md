@@ -3,6 +3,11 @@
 curl -fsSL https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/gsr/bootstrap.sh -o /tmp/bootstrap.sh && bash /tmp/bootstrap.sh
 ```
 
+## Start
+```
+systemctl --user start gsr
+```
+
 ## Dependencies
 - Podman
 
