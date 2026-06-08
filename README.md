@@ -1,6 +1,6 @@
 ## Quick install
 ``` bash
-curl -fsSL https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/podman/gsr/b
+curl -fsSL https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/gsr/b
 ootstrap.sh -o /tmp/bootstrap.sh && bash /tmp/bootstrap.sh
 ```
 
