@@ -3,7 +3,7 @@
 set -e
 
 REPO_URL="https://github.com/itsflipper/FlippersPackwizMods.git"
-BRANCH="podman"
+BRANCH="main"
 CONTAINER_FILE="gsr.container"
 SYSTEMD_DIR="$HOME/.config/containers/systemd"
 SERVICE_NAME="gsr"
