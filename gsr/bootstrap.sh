@@ -3,6 +3,7 @@
 set -e
 
 REPO_URL="https://github.com/itsflipper/FlippersPackwizMods.git"
+BRANCH="podman"
 CONTAINER_FILE="gayshitrevived.container"
 SYSTEMD_DIR="$HOME/.config/containers/systemd"
 SERVICE_NAME="gayshitrevived"
@@ -18,7 +19,7 @@ is_running() {
 
 fresh_install() {
     echo "==> Cloning repo into $repo_path"
-    git clone "$REPO_URL" "$repo_path"
+    git clone "$REPO_URL -b $BRANCH" "$repo_path"
 
     cd "$repo_path"
 
