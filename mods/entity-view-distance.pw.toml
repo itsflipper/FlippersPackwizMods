@@ -1,13 +1,13 @@
 name = "Entity View Distance"
-filename = "entity-view-distance-1.6.0+1.21.9.jar"
+filename = "entity-view-distance-1.8.1+26.1.jar"
 side = "both"
 
 [download]
-url = "https://cdn.modrinth.com/data/ihnBJ6on/versions/mGZ1qlbU/entity-view-distance-1.6.0%2B1.21.9.jar"
+url = "https://cdn.modrinth.com/data/ihnBJ6on/versions/znk3foAN/entity-view-distance-1.8.1%2B26.1.jar"
 hash-format = "sha512"
-hash = "9da28fc2b26b8aabddb7d41f53b9ae3d1b7bf7a7947882f2a73bf30df05fc49ca137e8480e43a3cf25fe3989a9aafd2dabbd3a11c430c62dac6ed266d6e57e03"
+hash = "9908844a3bcde6af144bb021099d3e9b9092c3820d1929d322abbae18d12f519fcfc80ea5a0b4d16a76677407a96c34f4599309be51fdab9803494872a5c306b"
 
 [update]
 [update.modrinth]
 mod-id = "ihnBJ6on"
-version = "mGZ1qlbU"
+version = "znk3foAN"
