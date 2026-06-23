@@ -1,0 +1,4 @@
+[Build]
+File=Containerfile
+ImageTag=localhost/gsr:latest
+SetWorkingDirectory=file
