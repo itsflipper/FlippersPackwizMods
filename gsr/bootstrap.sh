@@ -54,8 +54,7 @@ update() {
     git pull
 
     echo "==> Rebuilding image"
-    cd "$repo_path/gsr"
-    podman build -t "$SERVICE_NAME" .
+    podman build -t "$SERVICE_NAME" "$repo_path/gsr"
 
     echo "==> Reloading systemd"
     systemctl --user daemon-reload
