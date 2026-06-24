@@ -9,7 +9,7 @@ PublishPort=25565:25565/tcp
 Environment=EULA=TRUE
 Environment=VERSION=26.1.2
 Environment=TYPE=FABRIC
-Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/doppeltest/pack.toml
+Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/pack.toml
 
 Environment=ENABLE_WHITELIST=TRUE
 Environment=OVERRIDE_WHITELIST=FALSE
