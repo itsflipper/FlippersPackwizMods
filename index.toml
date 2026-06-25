@@ -1,8 +1,37 @@
 hash-format = "sha256"
 
 [[files]]
+file = "README.md"
+hash = "d9cbd0bf5e1638a6c351ef00563d7be858985d8a297530b800dbc9939b639a5f"
+
+[[files]]
+file = "gsr/Containerfile"
+hash = "549abfb8e56d5b18444054ab6b596c47a26789e6776ec70d6a4c316c6afe926b"
+
+[[files]]
+file = "gsr/bootstrap.sh"
+hash = "9aeef4e9a88bdd963e4074f661ad365a71b6d7890f801a22bcb64dba1bf474f8"
+
+[[files]]
+file = "gsr/gsr.build"
+hash = "4da891ad8935e6f59687226c5d338d3facf31fd8a3ef2ca7ac26f3f8b710c0d5"
+
+[[files]]
+file = "gsr/gsr.container"
+hash = "26d01bf582d8e25d9b75289e88ee8aa25dcb3d8853e0339b7e732d75e411eee1"
+
+[[files]]
+file = "gsr/whitelist.json"
+hash = "b3f26ebbd46787b5021354c96957fe71bea413c62774730dbf8cd8529696611a"
+
+[[files]]
 file = "mods/3dskinlayers.pw.toml"
 hash = "98160b81327752e1ae3c2b05df6c001ec1ff7641adf962b694e73c4edb9d5e3e"
+metafile = true
+
+[[files]]
+file = "mods/actually-harvest.pw.toml"
+hash = "ad3aff56c8dc8a93c869b06c9da7977909510661aefab3c3f4b466fb2e2f6bd4"
 metafile = true
 
 [[files]]
@@ -17,7 +46,7 @@ metafile = true
 
 [[files]]
 file = "mods/c2me-fabric.pw.toml"
-hash = "d738fe51b20c8da621e36a0d65e15d7f4f9f8e2e8162670a2798610079790ee3"
+hash = "298bb7ba6652ce3664375e597c4a2e54510e840d22ac656fefc36096335c9202"
 metafile = true
 
 [[files]]
@@ -48,6 +77,11 @@ metafile = true
 [[files]]
 file = "mods/distanthorizons.pw.toml"
 hash = "2cc32f353cd0653d2964a5ca20ba8d4059e19d3c4bd59832f9b14765fddbeee1"
+metafile = true
+
+[[files]]
+file = "mods/dynamic-apples.pw.toml"
+hash = "693ee130c6ffe7b9f6f81f13a782c667e1f1cf6d180a0f6818a049256fca2830"
 metafile = true
 
 [[files]]
@@ -103,11 +137,6 @@ metafile = true
 [[files]]
 file = "mods/gamma-utils.pw.toml"
 hash = "356457a2271da11c38fad417a809518df6eb68b4acede6bc2c16932e2807a215"
-metafile = true
-
-[[files]]
-file = "mods/harvester-qol.pw.toml"
-hash = "53e1061633e639e6eecc5bb4846cd787b97703bab558ca6bdbb57b758f30e544"
 metafile = true
 
 [[files]]
@@ -187,7 +216,7 @@ metafile = true
 
 [[files]]
 file = "mods/servercore.pw.toml"
-hash = "97e4d21abff963db95ddb582a84e1969189fa7d5774b2e508df3b22cf6b82a0a"
+hash = "e2b6540e0f7c6a728d575235084f50c6398e23924f4a4fa4e8d5182aeffe803c"
 metafile = true
 
 [[files]]
@@ -202,7 +231,7 @@ metafile = true
 
 [[files]]
 file = "mods/sodium.pw.toml"
-hash = "a699bfe2548067cd28d4a95d2c89a1d1ffa54fd5d90c19419f9037a8d6bf015a"
+hash = "23ea9cbbe101c02fa303de93336834febc20c6606147f7f22a7c1a536d0e5557"
 metafile = true
 
 [[files]]
@@ -217,10 +246,10 @@ metafile = true
 
 [[files]]
 file = "mods/yacl.pw.toml"
-hash = "67866b7484801e784c42ecd443ebf6a29640fe796feec91c248def2642aec952"
+hash = "e212db98871e5d51f2015f3134090353cec414333af3ba2e6015b8c642f5267b"
 metafile = true
 
 [[files]]
 file = "mods/zoomify.pw.toml"
-hash = "055e6a5ca54023619cbc1d0c91d4a102d4eb37981940dc3f8de62e6a3ecb3e86"
+hash = "db52e50c6846f0850e9a58ed9709310b87efa4f924caa013b8a49ab96f86f714"
 metafile = true

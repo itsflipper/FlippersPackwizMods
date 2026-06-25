@@ -1,0 +1,13 @@
+name = "Dynamic apples"
+filename = "oak-apples-1.0.26.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/s3nn9vfG/versions/UpKVBd7s/oak-apples-1.0.26.jar"
+hash-format = "sha512"
+hash = "30dce4c0b46f07a96286e47818447ecc5cbe578ab1e668c303a48630d1a66c3ec665c4ce6bc7bb0dc3d4c07eea6c19d9699bfab728a742034f691de319c339cf"
+
+[update]
+[update.modrinth]
+mod-id = "s3nn9vfG"
+version = "UpKVBd7s"
