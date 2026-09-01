@@ -32,6 +32,9 @@ sudo usermod --add-subuids 231072-296607 --add-subgids 231072-296607 gsr-podman
 # Enable lingering so systemd user services survive logout
 sudo loginctl enable-linger gsr-podman
 
+# Interactive shell for gsr user
+sudo machinectl shell gsr-podman@ /usr/bin/bash
+
 # Run a one-off command as the service user
 sudo machinectl shell gsr-podman@ /usr/bin/podman ps
 ```
