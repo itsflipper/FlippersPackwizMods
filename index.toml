@@ -1,30 +1,6 @@
 hash-format = "sha256"
 
 [[files]]
-file = "README.md"
-hash = "079a20b08b21e6fe408ec406a686f6aaeb18416a4c760c3292697ebff98a2ce6"
-
-[[files]]
-file = "gsr/Containerfile"
-hash = "549abfb8e56d5b18444054ab6b596c47a26789e6776ec70d6a4c316c6afe926b"
-
-[[files]]
-file = "gsr/bootstrap.sh"
-hash = "9aeef4e9a88bdd963e4074f661ad365a71b6d7890f801a22bcb64dba1bf474f8"
-
-[[files]]
-file = "gsr/gsr.build"
-hash = "4da891ad8935e6f59687226c5d338d3facf31fd8a3ef2ca7ac26f3f8b710c0d5"
-
-[[files]]
-file = "gsr/gsr.container"
-hash = "26d01bf582d8e25d9b75289e88ee8aa25dcb3d8853e0339b7e732d75e411eee1"
-
-[[files]]
-file = "gsr/whitelist.json"
-hash = "b3f26ebbd46787b5021354c96957fe71bea413c62774730dbf8cd8529696611a"
-
-[[files]]
 file = "mods/3dskinlayers.pw.toml"
 hash = "d948339327bc53e47c9133f0ec00db69d37a804d1bd35de20421344cdc6df94b"
 metafile = true
