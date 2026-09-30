@@ -1,13 +1,13 @@
 name = "Leaves Be Gone"
-filename = "LeavesBeGone-v26.1.0-mc26.1.x-Fabric.jar"
+filename = "leavesbegone-v26.3.0-mc26.3.x+fabric.jar"
 side = "server"
 
 [download]
-url = "https://cdn.modrinth.com/data/AVq17PqV/versions/PyXgFChf/LeavesBeGone-v26.1.0-mc26.1.x-Fabric.jar"
+url = "https://cdn.modrinth.com/data/AVq17PqV/versions/Ttuy044k/leavesbegone-v26.3.0-mc26.3.x%2Bfabric.jar"
 hash-format = "sha512"
-hash = "dbef80c93f39110edd5cf73d42a32c9a285d0dd193bdf3888b74af3dfdd5d59e10d455ef016f380805b2e873b82f997514b5f0471ad0761fb3a54fd09031672c"
+hash = "8b9ac3bd8fb28cf4c1c06ec3d1f4c33b86993461e298fc4517e017518d22b0588fb4ac8a1daa8d6f8f6a74406bc69dcdbc8f39714d7b303d03bdd17e4336ccc2"
 
 [update]
 [update.modrinth]
 mod-id = "AVq17PqV"
-version = "PyXgFChf"
+version = "Ttuy044k"
