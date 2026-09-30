@@ -1,13 +1,13 @@
 name = "Jukebox Custom Disc Fix"
-filename = "jukeboxcustomdiscfix-fabric-0.2.0-26.1.1.jar"
+filename = "jukeboxcustomdiscfix-fabric-0.2.0-26.3.jar"
 side = "both"
 
 [download]
-url = "https://cdn.modrinth.com/data/NtPNF0D7/versions/z05w7wQc/jukeboxcustomdiscfix-fabric-0.2.0-26.1.1.jar"
+url = "https://cdn.modrinth.com/data/NtPNF0D7/versions/cicm6ccp/jukeboxcustomdiscfix-fabric-0.2.0-26.3.jar"
 hash-format = "sha512"
-hash = "4d44d2d0d6de5400b0096ed1fd6803be8db6faa3245eca7375ee9f3338e93b4410ecd71f88105850e365807e4b4b35c200bd0d8539037e8067135eaeb75bbe36"
+hash = "73e04bb70e1126729eac315758967fa80996be06ffc194f4f5d4b0c8eec802ed82c64e700a0f6627af3498d160351921c5b05b11a6d0b2520a3337621cbb9730"
 
 [update]
 [update.modrinth]
 mod-id = "NtPNF0D7"
-version = "z05w7wQc"
+version = "cicm6ccp"
