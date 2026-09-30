@@ -2,7 +2,7 @@ hash-format = "sha256"
 
 [[files]]
 file = "README.md"
-hash = "d9cbd0bf5e1638a6c351ef00563d7be858985d8a297530b800dbc9939b639a5f"
+hash = "079a20b08b21e6fe408ec406a686f6aaeb18416a4c760c3292697ebff98a2ce6"
 
 [[files]]
 file = "gsr/Containerfile"
@@ -77,11 +77,6 @@ metafile = true
 [[files]]
 file = "mods/distanthorizons.pw.toml"
 hash = "8cfd619edd7190fdd7f048bc7815193699d0583857f988e421b8e7816167ad25"
-metafile = true
-
-[[files]]
-file = "mods/dynamic-apples.pw.toml"
-hash = "693ee130c6ffe7b9f6f81f13a782c667e1f1cf6d180a0f6818a049256fca2830"
 metafile = true
 
 [[files]]
@@ -231,7 +226,7 @@ metafile = true
 
 [[files]]
 file = "mods/sodium.pw.toml"
-hash = "95b014c29351598261257614a55955215bba353a93593b2050cb07da295d3302"
+hash = "54d699d9ba85bb08b9fd3696a11c7449ea1175a118805855143e1c88fa54aa6b"
 metafile = true
 
 [[files]]
