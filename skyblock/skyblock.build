@@ -1,0 +1,4 @@
+[Build]
+File=Containerfile
+ImageTag=localhost/skyblock:latest
+SetWorkingDirectory=file

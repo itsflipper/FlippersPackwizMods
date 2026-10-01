@@ -1,0 +1,2 @@
+FROM docker.io/itzg/minecraft-server:latest
+COPY whitelist.json /data/whitelist.json
