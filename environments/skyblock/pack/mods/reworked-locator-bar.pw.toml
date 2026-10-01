@@ -1,0 +1,13 @@
+name = "Locator Bar"
+filename = "LocatorBar-fabric-1.2.3+26.2.x.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/BD7N7OcY/versions/Q5wTJS91/LocatorBar-fabric-1.2.3%2B26.2.x.jar"
+hash-format = "sha512"
+hash = "96ec2c4656774f79a5b3ca9407b4723713ea3417299e8fb9493dbb2e8a91595543ff12eca25944ae50cb74e7f1da9181d27e1c036ed482eb26e70d279cb60960"
+
+[update]
+[update.modrinth]
+mod-id = "BD7N7OcY"
+version = "Q5wTJS91"

@@ -1,5 +1,5 @@
 [Unit]
-Description=Skyblock test server
+Description=Skyblock
 
 [Container]
 Image=skyblock.build
@@ -7,13 +7,13 @@ ContainerName=skyblock
 PublishPort=25565:25565/tcp
 
 Environment=EULA=TRUE
-Environment=VERSION=26.3
+Environment=VERSION=26.2
 Environment=TYPE=FABRIC
 Environment=LEVEL=skyblock
 Environment=SEED=FlipperSkyblock26_3
-Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/pack.toml
+Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/environments/skyblock/pack/pack.toml
 
-Environment=DATAPACKS=https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_worldgen_v2_0_12-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_island_standard_v1_1_7-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_sand_island_v2_0_5-MC_26_2.zip
+Environment=DATAPACKS=https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_worldgen_v2_0_12-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_island_standard_v1_1_7-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_sand_island_v2_0_5-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_advancements_v1_0_13-MC_26_2.zip
 
 Environment=ENABLE_WHITELIST=TRUE
 Environment=OVERRIDE_WHITELIST=FALSE

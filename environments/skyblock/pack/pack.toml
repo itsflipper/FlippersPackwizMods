@@ -1,0 +1,13 @@
+name = "FlipperSkyblock"
+author = "fipsqqqqqq"
+version = "1.0.0"
+pack-format = "packwiz:1.1.0"
+
+[index]
+file = "index.toml"
+hash-format = "sha256"
+hash = "dcba28eee27288b84bef0363bf05f32dbaecf670ea4af9d4506cd06617deffcd"
+
+[versions]
+fabric = "0.19.5"
+minecraft = "26.2"
