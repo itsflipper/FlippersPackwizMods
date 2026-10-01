@@ -46,6 +46,11 @@ hash = "2b9727522c90a979eb9671ad7c5421443d91391b0697d1772146e6bfa19cb3c1"
 metafile = true
 
 [[files]]
+file = "mods/context-tools.pw.toml"
+hash = "dd401bba0fa1305133bd908402561bfac5f25505fb21517f0a38ce0539232af9"
+metafile = true
+
+[[files]]
 file = "mods/crashexploitfixer.pw.toml"
 hash = "cae73ff170f38b18a2d5c9eab5a311ee13ab76d359afbcc9153a292e47607d82"
 metafile = true
@@ -101,8 +106,18 @@ hash = "069d81cab53c0141459ad4d70bcf3e10f17652f24cc62d3b4a0fc2cd2b700871"
 metafile = true
 
 [[files]]
+file = "mods/first-person-model.pw.toml"
+hash = "ad510531885c9c685ddf76ad3f4a329647eb31077e3a0374008cd5224874e189"
+metafile = true
+
+[[files]]
 file = "mods/forge-config-api-port.pw.toml"
 hash = "3eb12471fce0aadbda432f7fd5ba4e2120e0e0ebbb3663eea756a17ec0254407"
+metafile = true
+
+[[files]]
+file = "mods/freecam.pw.toml"
+hash = "c06f7a10340c07828d47e0a3b78e0b839723da4e9e6030e99ea166222007db32"
 metafile = true
 
 [[files]]
@@ -141,6 +156,11 @@ hash = "a39389e4c813b70b984a0c8aed769825b32c321ee0b9aed1151d92cb38f77357"
 metafile = true
 
 [[files]]
+file = "mods/locator-heads.pw.toml"
+hash = "a8c2641bfbe4758d8d33f21b926f5cec48cb555becaded7cd6f0de2fc2bf0f91"
+metafile = true
+
+[[files]]
 file = "mods/modmenu.pw.toml"
 hash = "cd05db76d670773ace1184abdd46126e7b7c75c2b70da82e1764cff9544c4269"
 metafile = true
@@ -148,6 +168,16 @@ metafile = true
 [[files]]
 file = "mods/moreculling.pw.toml"
 hash = "f32ebeb468312cf555bd84d09c1a3a6e6f9ed992e4afc3ce9620aca571490806"
+metafile = true
+
+[[files]]
+file = "mods/mouse-tweaks.pw.toml"
+hash = "d9f809b321cdd117600e45f92215c8e750ed0b65641c18d394bb4c111019581d"
+metafile = true
+
+[[files]]
+file = "mods/nemos-inventory-sorting.pw.toml"
+hash = "fc47eda35dfde0dd29868f13a6094b6f41dc4c1cce394f316be28e381ca9a232"
 metafile = true
 
 [[files]]
@@ -191,6 +221,11 @@ hash = "07e3c8dc0d6b3717b01c91597e6d1a597333a1883731891df3c535164f96f5da"
 metafile = true
 
 [[files]]
+file = "mods/skinrestorer.pw.toml"
+hash = "1fca038d9bb8b2921d3b45db8acef5282539a8675a6d9520869b27298ad874dc"
+metafile = true
+
+[[files]]
 file = "mods/slumber.pw.toml"
 hash = "496ec14411fec1d4ab7191fddd34ee10f8f578d034e6a68273400e7ed33615fe"
 metafile = true
@@ -216,11 +251,26 @@ hash = "d9d97625ca8e65c474f373012b72c02dc6b8bce909d5acc91561bc4e3d0cb705"
 metafile = true
 
 [[files]]
+file = "mods/xaeros-maps-multiplayer-plus.pw.toml"
+hash = "1add40b6ee75d1e6c766ff0afc81208566615200169c88442219d77223a2cf4d"
+metafile = true
+
+[[files]]
+file = "mods/xaeros-minimap.pw.toml"
+hash = "6966c68c195a77f4d295b6f94f3f19eebc7b1a9dd76fc703a41cf0de579c0950"
+metafile = true
+
+[[files]]
+file = "mods/xaeros-world-map.pw.toml"
+hash = "6b25e967a58b4c60cd20267f0d05e630839eb4ddac780cbcb72e76b9e7bdc759"
+metafile = true
+
+[[files]]
 file = "mods/yacl.pw.toml"
 hash = "7b82bfcde20d2ac0fb158c003caf5288523272ca462f519864ee424912e4e4dd"
 metafile = true
 
 [[files]]
 file = "mods/zoomify.pw.toml"
-hash = "49c81f92ee85ae086d4d740d786b8f081c3a5610680ae7bfd4afe3046e659445"
+hash = "2eab932dd5793bbbba9959eb0924d386e0705e96d58b8f6249cd75804c713c18"
 metafile = true
