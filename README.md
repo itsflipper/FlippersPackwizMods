@@ -1,12 +1,25 @@
 # GSR - Personalized Fabric Server
 
 ### INCLUDES
-- Modpack managed via Packwiz (see `index.toml` for Mod-info)
+
+- Separate Packwiz modpacks per environment
+  - Vanilla: `environments/vanilla/pack/`
+  - Skyblock: `environments/skyblock/pack/`
 - MC-Server:
-  - Podman Quadlet using [itzg/minecraft-server](https://hub.docker.com/r/itzg/minecraft-server) as base image
-  - Fetches the modpack automatically
-  - `whitelist.json` baked in via the Containerfile (because we're lazy). Might add auto world `COPY` later too
-  - Bootstrap script for both fresh installs and updates
+  - Podman Quadlets using [itzg/minecraft-server](https://hub.docker.com/r/itzg/minecraft-server) as base image
+  - Fetches the matching modpack automatically
+  - Bootstrap script for both fresh installs and infrastructure updates
+- `scripts/switch-environment.sh` switches safely between environments
+- Worlds, player data and runtime configuration remain separate per environment
+
+## Environments
+
+| Environment | Minecraft | Service | Container | Volume | World |
+|---|---:|---|---|---|---|
+| Vanilla | 26.3 | `gsr.service` | `gsr` | `gayshitdata` | `world-26.3` |
+| Skyblock | 26.2 | `skyblock.service` | `skyblock` | `skyblockdata` | `skyblock` |
+
+Both environments use port `25565`; only one may run at a time.
 
 ## Quick install
 ``` bash

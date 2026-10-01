@@ -7,6 +7,9 @@ SYSTEMD_DIR="$HOME/.config/containers/systemd"
 ANCHOR_SERVICE="gsr"
 ANCHOR_SYMLINK="$SYSTEMD_DIR/$ANCHOR_SERVICE"
 ENVIRONMENTS_DIR="environments"
+USER_BIN_DIR="$HOME/.local/bin"
+COMMANDS_DIR="scripts/bin"
+BASHRC_FILE="$HOME/.bashrc"
 
 mkdir -p "$SYSTEMD_DIR"
 
@@ -60,6 +63,7 @@ sync_systemd() {
         echo "    $service_name -> $environment_dir"
     done < <(environment_container_files "$repo_path")
     systemctl --user daemon-reload
+    sync_user_commands "$repo_path"
 }
 inside_repo() {
     local repo_path="$1" cwd; cwd="$(pwd -P)"
@@ -111,6 +115,48 @@ update() {
     fi
 
     echo "==> Done"
+}
+
+ensure_user_bin_path() {
+    local marker="# FlippersPackwizMods user commands"
+
+    mkdir -p "$USER_BIN_DIR"
+    export PATH="$USER_BIN_DIR:$PATH"
+
+    if [[ ! -f "$BASHRC_FILE" ]] || ! grep -Fqx "$marker" "$BASHRC_FILE"; then
+        {
+            printf '\n%s\n' "$marker"
+            printf 'case ":$PATH:" in\n'
+            printf '  *":$HOME/.local/bin:"*) ;;\n'
+            printf '  *) export PATH="$HOME/.local/bin:$PATH" ;;\n'
+            printf 'esac\n'
+        } >> "$BASHRC_FILE"
+    fi
+}
+
+sync_user_commands() {
+    local repo_path command_dir command_path command_name link_path
+
+    repo_path="$(cd "$1" && pwd)"
+    command_dir="$repo_path/$COMMANDS_DIR"
+    [[ -d "$command_dir" ]] || return 0
+
+    ensure_user_bin_path
+
+    for command_path in "$command_dir"/*; do
+        [[ -f "$command_path" && -x "$command_path" ]] || continue
+
+        command_name="$(basename "$command_path")"
+        link_path="$USER_BIN_DIR/$command_name"
+
+        if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+            echo "Refusing to replace non-symlink command: $link_path" >&2
+            return 1
+        fi
+
+        ln -sfn "$command_path" "$link_path"
+        echo "    command: $command_name"
+    done
 }
 
 # -- main --
