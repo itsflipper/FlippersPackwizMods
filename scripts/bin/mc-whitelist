@@ -116,7 +116,6 @@ case "${1:-}" in
   audit)
     [[ $# -eq 1 ]] || { usage >&2; exit 2; }
     require_master
-    build_master
     python3 "$JSON_TOOL" audit "$IDENTITIES_FILE" "$MASTER_FILE"
     ;;
   -h|--help|help|'')
