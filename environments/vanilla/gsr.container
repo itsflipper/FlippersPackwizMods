@@ -13,12 +13,15 @@ Environment=TYPE=FABRIC
 Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/environments/vanilla/pack/pack.toml
 
 Environment=ENABLE_WHITELIST=TRUE
-Environment=OVERRIDE_WHITELIST=FALSE
+Environment=ENFORCE_WHITELIST=TRUE
+Environment=WHITELIST_FILE=/gsr-shared/whitelist.json
+Environment=EXISTING_WHITELIST_FILE=SYNCHRONIZE
 Environment=LOG_LEVEL=info
 Environment=MEMORY=6G
 Environment=ENABLE_RCON=true
 
 Volume=gayshitdata:/data
+Volume=%h/.config/gsr/shared:/gsr-shared:ro
 
 [Service]
 Restart=always

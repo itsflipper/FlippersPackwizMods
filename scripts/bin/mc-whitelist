@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+MASTER_DIR="$CONFIG_HOME/gsr/shared"
+MASTER_FILE="$MASTER_DIR/whitelist.json"
+IDENTITIES_FILE="$MASTER_DIR/identities.json"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+JSON_TOOL="$SCRIPT_DIR/../whitelist-json.py"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  mc-whitelist list
+  mc-whitelist add premium <Minecraft-name>
+  mc-whitelist add offline <Minecraft-name>
+  mc-whitelist remove <Minecraft-name> [premium|offline|all]
+  mc-whitelist apply
+  mc-whitelist audit
+
+premium obtains the global UUID from Mojang and also allows the matching
+offline UUID. offline only allows Minecraft's deterministic OfflinePlayer UUID.
+
+identities.json is the source of truth. whitelist.json is generated from it.
+EOF
+}
+
+valid_name() {
+  [[ "$1" =~ ^[A-Za-z0-9_]{3,16}$ ]]
+}
+
+require_master() {
+  [[ -f "$IDENTITIES_FILE" ]] || {
+    echo "No identities.json yet. Create it in $MASTER_DIR first." >&2
+    exit 1
+  }
+}
+
+build_master() {
+  python3 "$JSON_TOOL" build "$IDENTITIES_FILE" "$MASTER_FILE"
+}
+
+active_container() {
+  local script_path repo_root container_file container_name running=()
+  script_path="$(readlink -f "$0")"
+  repo_root="$(cd "$(dirname "$script_path")/../.." && pwd)"
+
+  while IFS= read -r -d '' container_file; do
+    container_name="$(sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$container_file" | head -n1)"
+    [[ -n "$container_name" ]] || continue
+    if podman inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null | grep -qx true; then
+      running+=("$container_name")
+    fi
+  done < <(find "$repo_root/environments" -mindepth 2 -maxdepth 2 -name '*.container' -print0)
+
+  if ((${#running[@]} > 1)); then
+    echo "More than one Minecraft environment is running; refusing to choose one." >&2
+    exit 1
+  fi
+  ((${#running[@]} == 1)) && printf '%s\n' "${running[0]}"
+}
+
+apply_master() {
+  local container
+  build_master
+  container="$(active_container)"
+  if [[ -z "$container" ]]; then
+    echo "Master whitelist saved. It will be applied when an environment starts."
+    return 0
+  fi
+
+  podman cp "$MASTER_FILE" "$container:/data/whitelist.json"
+  # podman cp preserves restrictive host modes. Minecraft itself runs as a
+  # non-root user in the image, so make the already-copied file readable.
+  podman exec --user 0 "$container" sh -lc 'chmod 644 /data/whitelist.json'
+  podman exec "$container" rcon-cli 'whitelist reload'
+  echo "Master whitelist applied to $container."
+}
+
+case "${1:-}" in
+  list)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+    require_master
+    build_master
+    python3 "$JSON_TOOL" list "$IDENTITIES_FILE"
+    ;;
+  add)
+    [[ $# -eq 3 ]] && valid_name "$3" || { usage >&2; exit 2; }
+    case "$2" in
+      premium|offline) ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    require_master
+    python3 "$JSON_TOOL" add "$IDENTITIES_FILE" "$2" "$3"
+    apply_master
+    ;;
+  remove)
+    [[ $# -eq 2 || $# -eq 3 ]] && valid_name "$2" || { usage >&2; exit 2; }
+    require_master
+    identity="${3:-all}"
+    case "$identity" in
+      premium|offline)
+        ;;
+      all)
+        ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    python3 "$JSON_TOOL" remove "$IDENTITIES_FILE" "$2" "$identity"
+    apply_master
+    ;;
+  apply)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+    require_master
+    apply_master
+    ;;
+  audit)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+    require_master
+    build_master
+    python3 "$JSON_TOOL" audit "$IDENTITIES_FILE" "$MASTER_FILE"
+    ;;
+  -h|--help|help|'')
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

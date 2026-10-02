@@ -10,6 +10,12 @@ ENVIRONMENTS_DIR="environments"
 USER_BIN_DIR="$HOME/.local/bin"
 COMMANDS_DIR="scripts/bin"
 BASHRC_FILE="$HOME/.bashrc"
+DEFAULT_REPO_PATH="${DEFAULT_REPO_PATH:-$HOME/FlippersPackwizMods}"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+PRIVATE_CONFIG_DIR="$CONFIG_HOME/gsr"
+SHARED_DIR="$PRIVATE_CONFIG_DIR/shared"
+MASTER_WHITELIST="$SHARED_DIR/whitelist.json"
+MASTER_IDENTITIES="$SHARED_DIR/identities.json"
 
 mkdir -p "$SYSTEMD_DIR"
 
@@ -45,9 +51,67 @@ active_environment_services() {
     done < <(environment_services "$repo_path")
 }
 
+container_name_for_file() {
+    sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$1" | head -n1
+}
+
+seed_master_whitelist() {
+    local repo_path="$1" container_file container_name priority temp_dir temp_file json_tool
+
+    [[ -e "$MASTER_IDENTITIES" ]] && return 0
+
+    mkdir -p "$SHARED_DIR"
+    # The bind mount is created by the rootless Podman owner. The source
+    # remains private to that account; the image copies the whitelist during
+    # its root-owned startup phase.
+    chmod 700 "$PRIVATE_CONFIG_DIR" "$SHARED_DIR"
+    temp_dir="$(mktemp -d "$SHARED_DIR/.whitelist.XXXXXX")"
+    temp_file="$temp_dir/whitelist.json"
+    json_tool="$repo_path/scripts/whitelist-json.py"
+
+    # Prefer the live server: its whitelist is the authoritative current one.
+    # A stopped container is only a migration fallback for an idle installation.
+    for priority in running any; do
+        while IFS= read -r container_file; do
+            container_name="$(container_name_for_file "$container_file")"
+            [[ -n "$container_name" ]] || continue
+            if ! podman container exists "$container_name" 2>/dev/null; then
+                continue
+            fi
+            if [[ "$priority" == running ]] && \
+                ! podman inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null | grep -qx true; then
+                continue
+            fi
+            if podman cp "$container_name:/data/whitelist.json" "$temp_file" 2>/dev/null && \
+                grep -q '^[[:space:]]*\[' "$temp_file"; then
+                chmod 644 "$temp_file"
+                mv -f "$temp_file" "$MASTER_WHITELIST"
+                python3 "$json_tool" migrate "$MASTER_WHITELIST" "$MASTER_IDENTITIES"
+                rmdir "$temp_dir"
+                echo "==> Created private identities and master whitelist from $container_name"
+                return 0
+            fi
+        done < <(environment_container_files "$repo_path")
+    done
+
+    cp "$repo_path/defaults/whitelist.example.json" "$temp_file"
+    chmod 644 "$temp_file"
+    mv -f "$temp_file" "$MASTER_WHITELIST"
+    python3 "$json_tool" migrate "$MASTER_WHITELIST" "$MASTER_IDENTITIES"
+    rmdir "$temp_dir"
+    echo "==> Created empty private identities and master whitelist"
+}
+
+sync_private_whitelist() {
+    local repo_path="$1"
+
+    seed_master_whitelist "$repo_path"
+}
+
 sync_systemd() {
     local repo_path container_file environment_dir service_name link_path
     repo_path="$(cd "$1" && pwd)"
+    sync_private_whitelist "$repo_path"
     echo "==> Linking environments + reloading systemd"
     while IFS= read -r container_file; do
         [[ -f "$container_file" ]] || continue
