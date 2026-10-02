@@ -17,14 +17,14 @@ Environment=DATAPACKS=https://github.com/BPR02/SkyBlock_Collection/releases/down
 
 Environment=ENABLE_WHITELIST=TRUE
 Environment=ENFORCE_WHITELIST=TRUE
-Environment=WHITELIST_FILE=/gsr-shared/whitelist.json
+Environment=WHITELIST_FILE=/tmp/gsr-whitelist.json
 Environment=EXISTING_WHITELIST_FILE=SYNCHRONIZE
 Environment=LOG_LEVEL=info
 Environment=MEMORY=6G
 Environment=ENABLE_RCON=true
 
 Volume=skyblockdata:/data
-Volume=%h/.config/gsr/shared:/gsr-shared:ro
+Volume=%h/.config/gsr/shared/whitelist.json:/tmp/gsr-whitelist.json:ro
 
 [Service]
 Restart=always
