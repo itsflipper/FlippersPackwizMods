@@ -12,6 +12,8 @@ Environment=LEVEL=world-26.3
 Environment=TYPE=FABRIC
 Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/environments/vanilla/pack/pack.toml
 
+Environment=ONLINE_MODE=FALSE
+Environment=ENFORCE_SECURE_PROFILE=FALSE
 Environment=ENABLE_WHITELIST=TRUE
 Environment=ENFORCE_WHITELIST=TRUE
 Environment=WHITELIST_FILE=/gsr-shared/whitelist.json
