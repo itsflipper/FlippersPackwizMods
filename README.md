@@ -27,14 +27,35 @@ Both environments use port `25565`; only one may run at a time.
 On its first run, `bootstrap.sh` creates the server-private identity source and
 the generated master whitelist under `~/.config/gsr/`:
 
-- `shared/identities.json` is the source of truth: it records the exact name,
-  deterministic offline UUID, optional Mojang UUID and permitted identities.
-- `shared/whitelist.json` is generated from it and used by all environments.
+- `shared/identities.json` is the source of truth: it records the exact player
+  name, deterministic offline UUID, optional Mojang UUID, and which identities
+  are allowed.
+- `shared/whitelist.json` is generated from it and used by every environment.
   Neither file is committed to Git.
 
-The old environment-local `whitelist.json` files are intentionally gone. The
-placeholder `defaults/whitelist.example.json` is empty and is only used for a
-brand-new installation.
+The old environment-local `whitelist.json` files are intentionally gone.
+`defaults/identities.example.json` documents the format with fictional names
+and UUIDs only; bootstrap never copies it into a real server profile.
+
+Bootstrap preserves existing private data:
+
+- If both private files exist, it changes neither of them.
+- If `identities.json` exists but `whitelist.json` is missing, it rebuilds the
+  master whitelist from the identities.
+- If `whitelist.json` exists but `identities.json` is missing, it migrates the
+  master once into the identity source.
+- If neither file exists, it creates an empty identity source. For an existing
+  server without private files, its current local whitelist is migrated once.
+
+For a manual setup, the real files belong here, never in the repository:
+
+```text
+~/.config/gsr/shared/identities.json  # source of truth, mode 600
+~/.config/gsr/shared/whitelist.json   # generated file, mode 644
+```
+
+Only the generated whitelist is mounted read-only into Minecraft containers;
+`identities.json` is never exposed to them.
 
 ### Whitelist command
 
@@ -45,26 +66,29 @@ mc-whitelist list
 mc-whitelist add premium PlayerName
 mc-whitelist add offline PlayerName
 mc-whitelist remove PlayerName [premium|offline|all]
+mc-whitelist apply
 mc-whitelist audit
 ```
 
-`add premium` gets the Java account UUID from Mojang and also enables the
-matching deterministic offline UUID. This is required because the current
-environments use `online-mode=false`; a premium owner can therefore enter with
-the offline UUID before EasyAuth classifies the account. `add offline` enables
-only the deterministic offline UUID. The command updates `identities.json`,
-regenerates the master and applies it immediately to the one running
-environment; without a running environment it is applied on the next start.
+`add premium` looks up the global Java UUID at Mojang and also allows the
+matching deterministic offline UUID. This is necessary because the current
+environments use `online-mode=false`: a premium owner can initially receive
+the offline UUID before EasyAuth classifies the account.
 
-The same name can deliberately have both a premium and an offline UUID in the
-master file. `mc-whitelist audit` verifies that the generated whitelist still
-matches its private identity source. Direct whitelist changes in the game or
-through RCON are intentionally not imported, because they would bypass UUID
-classification.
+`add offline` enables only the deterministic offline UUID. The command updates
+`identities.json`, rebuilds the master whitelist, and applies it immediately to
+the single running environment. Without a running environment, it is applied
+on the next start.
 
-“Private” here means server-local and outside the repository. The bind-mounted
-file is readable by the rootless Minecraft process, but contains no passwords
-or account database; those remain only in the profile volume.
+A player can deliberately have both a premium and an offline UUID in the
+master whitelist. `mc-whitelist audit` verifies that the generated file matches
+the private identity source. Changes made directly through the Minecraft game,
+RCON, or `whitelist.json` are not authoritative and can be replaced by the next
+`mc-whitelist apply`; record permanent changes in `identities.json` or use
+`mc-whitelist`.
+
+“Private” means server-local and outside the repository. The generated
+whitelist contains no passwords or EasyAuth database data.
 
 ## Quick install
 ``` bash

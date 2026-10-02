@@ -56,9 +56,7 @@ container_name_for_file() {
 }
 
 seed_master_whitelist() {
-    local repo_path="$1" container_file container_name priority temp_dir temp_file json_tool
-
-    [[ -e "$MASTER_IDENTITIES" ]] && return 0
+    local repo_path="$1" container_file container_name priority temp_dir temp_file json_tool migrated=false
 
     mkdir -p "$SHARED_DIR"
     # The bind mount is created by the rootless Podman owner. The source
@@ -69,37 +67,52 @@ seed_master_whitelist() {
     temp_file="$temp_dir/whitelist.json"
     json_tool="$repo_path/scripts/whitelist-json.py"
 
-    # Prefer the live server: its whitelist is the authoritative current one.
-    # A stopped container is only a migration fallback for an idle installation.
-    for priority in running any; do
-        while IFS= read -r container_file; do
-            container_name="$(container_name_for_file "$container_file")"
-            [[ -n "$container_name" ]] || continue
-            if ! podman container exists "$container_name" 2>/dev/null; then
-                continue
-            fi
-            if [[ "$priority" == running ]] && \
-                ! podman inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null | grep -qx true; then
-                continue
-            fi
-            if podman cp "$container_name:/data/whitelist.json" "$temp_file" 2>/dev/null && \
-                grep -q '^[[:space:]]*\[' "$temp_file"; then
-                chmod 644 "$temp_file"
-                mv -f "$temp_file" "$MASTER_WHITELIST"
-                python3 "$json_tool" migrate "$MASTER_WHITELIST" "$MASTER_IDENTITIES"
-                rmdir "$temp_dir"
-                echo "==> Created private identities and master whitelist from $container_name"
-                return 0
-            fi
-        done < <(environment_container_files "$repo_path")
-    done
+    if [[ ! -f "$MASTER_IDENTITIES" ]]; then
+        if [[ -f "$MASTER_WHITELIST" ]]; then
+            python3 "$json_tool" migrate "$MASTER_WHITELIST" "$MASTER_IDENTITIES"
+            migrated=true
+            echo "==> Created private identities from the existing master whitelist"
+        else
+            # Prefer the live server: its whitelist is the authoritative current one.
+            # A stopped container is only a migration fallback for an idle installation.
+            for priority in running any; do
+                while IFS= read -r container_file; do
+                    container_name="$(container_name_for_file "$container_file")"
+                    [[ -n "$container_name" ]] || continue
+                    if ! podman container exists "$container_name" 2>/dev/null; then
+                        continue
+                    fi
+                    if [[ "$priority" == running ]] && \
+                        ! podman inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null | grep -qx true; then
+                        continue
+                    fi
+                    if podman cp "$container_name:/data/whitelist.json" "$temp_file" 2>/dev/null && \
+                        grep -q '^[[:space:]]*\[' "$temp_file"; then
+                        chmod 644 "$temp_file"
+                        mv -f "$temp_file" "$MASTER_WHITELIST"
+                        python3 "$json_tool" migrate "$MASTER_WHITELIST" "$MASTER_IDENTITIES"
+                        migrated=true
+                        echo "==> Created private identities and master whitelist from $container_name"
+                        break 2
+                    fi
+                done < <(environment_container_files "$repo_path")
+            done
 
-    cp "$repo_path/defaults/whitelist.example.json" "$temp_file"
-    chmod 644 "$temp_file"
-    mv -f "$temp_file" "$MASTER_WHITELIST"
-    python3 "$json_tool" migrate "$MASTER_WHITELIST" "$MASTER_IDENTITIES"
+            if [[ "$migrated" == false ]]; then
+                printf '[]\n' > "$temp_file"
+                python3 "$json_tool" migrate "$temp_file" "$MASTER_IDENTITIES"
+                echo "==> Created empty private identities"
+            fi
+        fi
+    fi
+
+    if [[ ! -f "$MASTER_WHITELIST" ]]; then
+        python3 "$json_tool" build "$MASTER_IDENTITIES" "$MASTER_WHITELIST"
+        echo "==> Generated master whitelist from private identities"
+    fi
+
+    rm -f "$temp_file"
     rmdir "$temp_dir"
-    echo "==> Created empty private identities and master whitelist"
 }
 
 sync_private_whitelist() {

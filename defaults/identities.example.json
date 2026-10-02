@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "players": [
+    {
+      "name": "MapleCraft",
+      "offline_uuid": "76b5a9f2-7118-31f2-aea1-9556e530973e",
+      "premium_uuid": "11111111-2222-4333-8444-555555555555",
+      "observed_easyauth_uuid": null,
+      "allow_offline_uuid": true,
+      "allow_premium_uuid": true,
+      "note": "Example only. The premium UUID is deliberately fictional."
+    },
+    {
+      "name": "QuartzFox",
+      "offline_uuid": "fcf427df-89ea-3f5a-8bd5-4b05a18f72ec",
+      "premium_uuid": null,
+      "observed_easyauth_uuid": null,
+      "allow_offline_uuid": true,
+      "allow_premium_uuid": false,
+      "note": "Example only: an offline-only account."
+    }
+  ]
+}
