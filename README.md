@@ -11,6 +11,7 @@
   - Bootstrap script for both fresh installs and infrastructure updates
 - `scripts/switch-environment.sh` switches safely between environments
 - `mc-whitelist` maintains one private whitelist for every environment
+- `gsr-backup` keeps one verified full-volume backup per environment
 - Worlds, player data and runtime configuration remain separate per environment
 
 ## Environments
@@ -90,6 +91,38 @@ RCON, or `whitelist.json` are not authoritative and can be replaced by the next
 “Private” means server-local and outside the repository. The generated
 whitelist contains no passwords or EasyAuth database data.
 
+## Environment backups
+
+`gsr-backup` keeps exactly one verified, complete local backup for each
+environment under `~/.local/share/gsr/backups/`. It is outside the repository,
+so bootstrap and Git updates never replace it. It contains the whole Podman
+`/data` volume, including the world, player data, EasyAuth database, mods, and
+runtime configuration. The private shared whitelist source is copied alongside
+it.
+
+Before a planned stop, restart, or environment switch, the service flushes the
+Minecraft save. After the container has stopped, its now-idle volume is
+exported, compressed with zstd, verified, and made current. The previous local
+backup is only removed after the new archive has passed its integrity checks.
+
+The normal server start always uses its live volume; a backup is never mounted
+automatically. Direct `podman stop` commands bypass this protection. Use
+`systemctl`, `switchenv`, or the bootstrap script for planned maintenance.
+
+```bash
+gsr-backup list
+gsr-backup verify vanilla
+gsr-backup create skyblock
+gsr-backup restore vanilla restored-vanilla
+```
+
+`create` is only for a stopped environment. The automatic hooks handle running
+environments. `restore` verifies the archive and imports it only into a newly
+created, separately named volume; it refuses to touch the live volume or any
+existing volume. Point an environment at that new volume only after inspecting
+it. The saved `shared/` directory is reference material and is not copied back
+automatically.
+
 ## Quick install
 ``` bash
 curl -fsSL https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/gsr/bootstrap.sh -o /tmp/bootstrap.sh && bash /tmp/bootstrap.sh
@@ -125,6 +158,7 @@ sudo machinectl shell gsr-podman@ /usr/bin/podman ps
 
 ## Dependencies
 - Podman
+- zstd
 - skill
 
 ## Manual install

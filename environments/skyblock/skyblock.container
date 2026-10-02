@@ -28,6 +28,9 @@ Volume=%h/.config/gsr/shared/whitelist.json:/tmp/gsr-whitelist.json:ro
 
 [Service]
 Restart=always
+TimeoutStopSec=900
+ExecStopPre=-%h/.local/bin/gsr-backup prepare skyblock
+ExecStopPost=-%h/.local/bin/gsr-backup finalize skyblock
 
 [Install]
 WantedBy=default.target
