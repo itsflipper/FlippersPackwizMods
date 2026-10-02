@@ -40,20 +40,36 @@ def load_whitelist(path: Path) -> list[dict[str, str]]:
 
 def save_whitelist(path: Path, entries: list[dict[str, str]]) -> None:
     entries.sort(key=lambda entry: (entry["name"].casefold(), entry["uuid"]))
-    fd, temporary = tempfile.mkstemp(prefix=".whitelist.", suffix=".json", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(entries, handle, indent=2)
-            handle.write("\n")
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, path)
-    except OSError as error:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        fail(f"Cannot save whitelist {path}: {error}")
+    payload = json.dumps(entries, indent=2) + "\n"
 
+    try:
+        if path.exists():
+            # whitelist.json is bind-mounted into running containers. Rewriting
+            # this existing file preserves its inode, so the mount sees updates.
+            with path.open("w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(path, 0o644)
+        else:
+            fd, temporary = tempfile.mkstemp(
+                prefix=".whitelist.", suffix=".json", dir=path.parent
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(payload)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary, 0o644)
+                os.replace(temporary, path)
+            except OSError:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+                raise
+    except OSError as error:
+        fail(f"Cannot save whitelist {path}: {error}")
 
 def offline_uuid(name: str) -> str:
     digest = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode("utf-8")).digest())
