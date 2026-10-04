@@ -24,6 +24,7 @@ usage() {
     cat <<'EOF'
 Usage:
   gsr-backup-pull setup
+  gsr-backup-pull configure
   gsr-backup-pull list
   gsr-backup-pull pull <environment>
   gsr-backup-pull verify <environment> [current|previous|snapshot-id]
@@ -31,8 +32,9 @@ Usage:
   gsr-backup-pull restore-server <environment> <current|previous|snapshot-id>
 
 setup stores this computer's private connection settings, selected environments,
-and local retention. pull is intentionally manual: it creates no timer or
-automatic network transfer.
+and local retention. configure changes those settings without touching existing
+backups. pull is intentionally manual: it creates no timer or automatic network
+transfer.
 EOF
 }
 
@@ -217,21 +219,44 @@ os.replace(temporary, path)
 PY
 }
 
-setup() {
-    local default_root available output selected environment count answer index
+configure() {
+    local mode="$1" default_root available output selected previous_selected environment count answer index
 
-    [[ ! -f "$CONFIG_FILE" ]] || fail "configuration already exists: $CONFIG_FILE"
-    read -rp 'SSH host: ' SSH_HOST
+    case "$mode" in
+        setup)
+            [[ ! -f "$CONFIG_FILE" ]] || fail "configuration already exists; run: gsr-backup-pull configure"
+            SSH_HOST=""
+            SSH_PORT=22
+            SSH_USER="$(id -un)"
+            SERVICE_USER=gsr-podman
+            default_root="${XDG_DATA_HOME:-$HOME/.local/share}/gsr-backups"
+            LOCAL_ROOT="$default_root"
+            RETENTION=2
+            previous_selected=""
+            ;;
+        update)
+            [[ -f "$CONFIG_FILE" ]] || fail "no configuration yet; run: gsr-backup-pull setup"
+            load_config
+            previous_selected="$(IFS=,; printf '%s' "${SELECTED_ENVIRONMENTS[*]}")"
+            ;;
+        *) fail "internal configuration mode: $mode"; return 1 ;;
+    esac
+
+    read -rp "SSH host [${SSH_HOST:-required}]: " answer
+    SSH_HOST="${answer:-$SSH_HOST}"
     [[ -n "$SSH_HOST" ]] || fail "SSH host is required"
-    read -rp 'SSH port [22]: ' SSH_PORT
-    SSH_PORT="${SSH_PORT:-22}"
-    read -rp "SSH user [$(id -un)]: " SSH_USER
-    SSH_USER="${SSH_USER:-$(id -un)}"
-    read -rp 'Podman service user [gsr-podman]: ' SERVICE_USER
-    SERVICE_USER="${SERVICE_USER:-gsr-podman}"
-    default_root="${XDG_DATA_HOME:-$HOME/.local/share}/gsr-backups"
-    read -rp "Local backup directory [$default_root]: " LOCAL_ROOT
-    LOCAL_ROOT="${LOCAL_ROOT:-$default_root}"
+    read -rp "SSH port [$SSH_PORT]: " answer
+    SSH_PORT="${answer:-$SSH_PORT}"
+    read -rp "SSH user [$SSH_USER]: " answer
+    SSH_USER="${answer:-$SSH_USER}"
+    read -rp "Podman service user [$SERVICE_USER]: " answer
+    SERVICE_USER="${answer:-$SERVICE_USER}"
+    read -rp "Local backup directory [$LOCAL_ROOT]: " answer
+    LOCAL_ROOT="${answer:-$LOCAL_ROOT}"
+    [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || fail "invalid SSH port"
+    [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SERVICE_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || \
+        fail "invalid SSH or service user"
+    [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:_-]*$ ]] || fail "invalid SSH host"
 
     mkdir -p "$CONFIG_DIR" "$LOCAL_ROOT"
     chmod 700 "$CONFIG_DIR" "$LOCAL_ROOT"
@@ -242,7 +267,8 @@ setup() {
     ((${#available[@]})) || fail "server reported no environments"
     printf 'Available environments:\n%s\n' "$output"
 
-    read -rp 'Environments to keep on this computer (comma-separated): ' selected
+    read -rp "Environments to keep on this computer [${previous_selected:-comma-separated}]: " selected
+    selected="${selected:-$previous_selected}"
     IFS=, read -r -a SELECTED_ENVIRONMENTS <<<"$selected"
     ((${#SELECTED_ENVIRONMENTS[@]})) || fail "select at least one environment"
     for index in "${!SELECTED_ENVIRONMENTS[@]}"; do
@@ -254,11 +280,23 @@ setup() {
         done
         [[ "$environment" == "$answer" ]] || fail "environment is not available: $environment"
     done
-    read -rp 'Complete local backups per selected environment [2]: ' count
-    RETENTION="${count:-2}"
+    read -rp "Complete local backups per selected environment [$RETENTION]: " count
+    RETENTION="${count:-$RETENTION}"
     [[ "$RETENTION" =~ ^[1-9][0-9]*$ ]] || fail "retention must be at least 1"
     write_config "$(IFS=,; echo "${SELECTED_ENVIRONMENTS[*]}")"
-    echo "Saved private pull configuration in $CONFIG_FILE."
+    if [[ "$mode" == setup ]]; then
+        echo "Saved private pull configuration in $CONFIG_FILE."
+    else
+        echo "Updated private pull configuration in $CONFIG_FILE. Existing backups were not changed."
+    fi
+}
+
+setup() {
+    configure setup
+}
+
+update_configuration() {
+    configure update
 }
 
 rotate_snapshots() {
@@ -439,6 +477,10 @@ case "${1:-}" in
     setup)
         [[ $# -eq 1 ]] || { usage >&2; exit 2; }
         setup
+        ;;
+    configure)
+        [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+        update_configuration
         ;;
     list)
         [[ $# -eq 1 ]] || { usage >&2; exit 2; }

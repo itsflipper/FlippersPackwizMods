@@ -174,6 +174,12 @@ happens after checksum, zstd, tar, and manifest validation succeed. A failed
 transfer removes its temporary files and leaves earlier complete snapshots
 unchanged.
 
+To later change the connection, selected environments, local destination, or
+retention without editing JSON, use `scripts/bin/gsr-backup-pull configure`.
+It verifies the selected environments with the server but does not move or
+delete existing local backups; a reduced retention is applied only after the
+next successful pull.
+
 A complete local backup can export just its world directory to any chosen
 directory without assuming a launcher or Minecraft instance layout:
 
