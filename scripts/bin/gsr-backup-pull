@@ -126,7 +126,6 @@ remote_first_command() {
         return 1
     }
     printf '%s\n' "$SUDO_PASSWORD" | remote_command '-S' "$command" "$environment"
-    unset SUDO_PASSWORD
 }
 
 remote_first_list() {
@@ -312,9 +311,13 @@ PY
 
     mkdir -p "$stage/snapshot"
     echo "Downloading verified backup of $environment; keep this terminal and connection open."
-    remote_command '-n' share-bundle "$environment" |
+    # SSH command invocations do not necessarily share sudo's timestamp.
+    # Reuse the one interactively entered password for this second remote
+    # command instead of assuming that a non-interactive sudo ticket persists.
+    printf '%s\n' "$SUDO_PASSWORD" | remote_command '-S' share-bundle "$environment" |
         python3 "$PROGRESS_TOOL" "$expected_bytes" |
         tar -xf - -C "$stage/snapshot" --no-same-owner --no-same-permissions
+    unset SUDO_PASSWORD
     [[ -f "$stage/snapshot/manifest.json" ]] || fail "server bundle is incomplete"
     cmp -s "$stage/manifest.json" "$stage/snapshot/manifest.json" || \
         fail "server backup changed during transfer; no local backup was stored"
