@@ -1,0 +1,474 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_PATH="$(readlink -f "$0")"
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
+PROGRESS_TOOL="$REPO_ROOT/scripts/backup-transfer-progress.py"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CONFIG_DIR="$CONFIG_HOME/gsr-backup-pull"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+
+CONTROL_DIR=""
+CONTROL_SOCKET=""
+SSH_HOST=""
+SSH_PORT=""
+SSH_USER=""
+SERVICE_USER=""
+LOCAL_ROOT=""
+RETENTION=""
+SUDO_PASSWORD=""
+STAGING_DIR=""
+declare -a SELECTED_ENVIRONMENTS=()
+
+usage() {
+    cat <<'EOF'
+Usage:
+  gsr-backup-pull setup
+  gsr-backup-pull list
+  gsr-backup-pull pull <environment>
+  gsr-backup-pull verify <environment> [current|previous|snapshot-id]
+  gsr-backup-pull export-world <environment> <current|previous|snapshot-id> <destination-directory>
+  gsr-backup-pull restore-server <environment> <current|previous|snapshot-id>
+
+setup stores this computer's private connection settings, selected environments,
+and local retention. pull is intentionally manual: it creates no timer or
+automatic network transfer.
+EOF
+}
+
+fail() {
+    echo "gsr-backup-pull: $*" >&2
+    return 1
+}
+
+cleanup_connection() {
+    local status=$?
+    unset SUDO_PASSWORD || true
+    if [[ -n "$CONTROL_SOCKET" && -S "$CONTROL_SOCKET" ]]; then
+        ssh -S "$CONTROL_SOCKET" -O exit "$SSH_USER@$SSH_HOST" >/dev/null 2>&1 || true
+    fi
+    [[ -z "$CONTROL_DIR" ]] || rm -rf -- "$CONTROL_DIR"
+    [[ -z "$STAGING_DIR" ]] || rm -rf -- "$STAGING_DIR"
+    exit "$status"
+}
+
+trap cleanup_connection EXIT
+
+valid_environment() {
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]
+}
+
+config_value() {
+    local key="$1"
+    python3 - "$CONFIG_FILE" "$key" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+value = payload[sys.argv[2]]
+if isinstance(value, list):
+    print("\n".join(value))
+else:
+    print(value)
+PY
+}
+
+load_config() {
+    [[ -f "$CONFIG_FILE" ]] || fail "no configuration yet; run: gsr-backup-pull setup"
+    SSH_HOST="$(config_value ssh_host)"
+    SSH_PORT="$(config_value ssh_port)"
+    SSH_USER="$(config_value ssh_user)"
+    SERVICE_USER="$(config_value service_user)"
+    LOCAL_ROOT="$(config_value local_root)"
+    RETENTION="$(config_value retention)"
+    mapfile -t SELECTED_ENVIRONMENTS < <(config_value environments)
+
+    [[ "$SSH_PORT" =~ ^[0-9]+$ && "$RETENTION" =~ ^[1-9][0-9]*$ ]] || fail "invalid local configuration"
+    [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ && "$SERVICE_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || fail "invalid user name in local configuration"
+    [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:_-]*$ ]] || fail "invalid host name in local configuration"
+}
+
+environment_is_selected() {
+    local wanted="$1" item
+    for item in "${SELECTED_ENVIRONMENTS[@]}"; do
+        [[ "$item" == "$wanted" ]] && return 0
+    done
+    return 1
+}
+
+open_connection() {
+    CONTROL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gsr-backup-ssh.XXXXXX")"
+    chmod 700 "$CONTROL_DIR"
+    CONTROL_SOCKET="$CONTROL_DIR/control"
+
+    echo "Opening SSH connection to $SSH_USER@$SSH_HOST ..."
+    ssh -M -S "$CONTROL_SOCKET" -fnN -p "$SSH_PORT" "$SSH_USER@$SSH_HOST"
+}
+
+prompt_sudo_password() {
+    read -rsp "Sudo password on $SSH_HOST: " SUDO_PASSWORD
+    printf '\n'
+}
+
+remote_command() {
+    local authentication="$1" command="$2" environment="$3" remote
+    valid_environment "$environment" || fail "invalid environment: $environment"
+    printf -v remote 'sudo %s -p "" -H -u %q /home/%q/.local/bin/gsr-backup %q %q' \
+        "$authentication" "$SERVICE_USER" "$SERVICE_USER" "$command" "$environment"
+    ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
+}
+
+remote_first_command() {
+    local command="$1" environment="$2"
+    [[ -n "$SUDO_PASSWORD" ]] || {
+        fail "sudo password was not provided"
+        return 1
+    }
+    printf '%s\n' "$SUDO_PASSWORD" | remote_command '-S' "$command" "$environment"
+    unset SUDO_PASSWORD
+}
+
+remote_first_list() {
+    local remote
+    [[ -n "$SUDO_PASSWORD" ]] || {
+        fail "sudo password was not provided"
+        return 1
+    }
+    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr-backup list' \
+        "$SERVICE_USER" "$SERVICE_USER"
+    printf '%s\n' "$SUDO_PASSWORD" | \
+        ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
+    unset SUDO_PASSWORD
+}
+
+snapshot_directory() {
+    local environment="$1" reference="$2" root target
+    root="$LOCAL_ROOT/$environment"
+    case "$reference" in
+        current|previous)
+            target="$(readlink -e "$root/$reference" 2>/dev/null || true)"
+            ;;
+        *)
+            [[ "$reference" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]] || return 1
+            target="$root/snapshots/$reference"
+            ;;
+    esac
+    [[ -n "$target" && -d "$target" ]] || return 1
+    printf '%s\n' "$target"
+}
+
+verify_snapshot() {
+    local snapshot="$1" manifest environment archive expected_sha expected_size
+    manifest="$snapshot/manifest.json"
+    archive="$snapshot/volume.tar.zst"
+
+    [[ -f "$manifest" && -f "$archive" && -f "$archive.sha256" ]] || fail "snapshot is incomplete: $snapshot"
+    environment="$(python3 - "$manifest" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+for key in ("environment", "archive", "sha256", "archive_bytes"):
+    if key not in payload:
+        raise SystemExit(f"missing {key}")
+if payload["archive"] != "volume.tar.zst":
+    raise SystemExit("unexpected archive name")
+print(payload["environment"])
+PY
+)" || fail "invalid manifest: $manifest"
+    valid_environment "$environment" || fail "invalid environment in manifest"
+    read -r expected_sha expected_size < <(python3 - "$manifest" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+print(payload["sha256"], payload["archive_bytes"])
+PY
+)
+    [[ "$expected_sha" =~ ^[0-9a-f]{64}$ && "$expected_size" =~ ^[0-9]+$ ]] || fail "invalid archive metadata"
+    [[ "$(stat -c %s "$archive")" == "$expected_size" ]] || fail "archive size does not match manifest"
+    printf '%s  %s\n' "$expected_sha" volume.tar.zst | (cd "$snapshot" && sha256sum --check --status -)
+    zstd -tq "$archive"
+    zstd -dcq "$archive" | tar -tf - >/dev/null
+}
+
+write_config() {
+    local environments_csv="$1"
+    python3 - "$CONFIG_FILE" "$SSH_HOST" "$SSH_PORT" "$SSH_USER" "$SERVICE_USER" "$LOCAL_ROOT" "$RETENTION" "$environments_csv" <<'PY'
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+path = pathlib.Path(sys.argv[1])
+payload = {
+    "schema_version": 1,
+    "ssh_host": sys.argv[2],
+    "ssh_port": int(sys.argv[3]),
+    "ssh_user": sys.argv[4],
+    "service_user": sys.argv[5],
+    "local_root": sys.argv[6],
+    "retention": int(sys.argv[7]),
+    "environments": sys.argv[8].split(","),
+}
+fd, temporary = tempfile.mkstemp(prefix=".config.", dir=path.parent)
+with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+PY
+}
+
+setup() {
+    local default_root available output selected environment count answer index
+
+    [[ ! -f "$CONFIG_FILE" ]] || fail "configuration already exists: $CONFIG_FILE"
+    read -rp 'SSH host: ' SSH_HOST
+    [[ -n "$SSH_HOST" ]] || fail "SSH host is required"
+    read -rp 'SSH port [22]: ' SSH_PORT
+    SSH_PORT="${SSH_PORT:-22}"
+    read -rp "SSH user [$(id -un)]: " SSH_USER
+    SSH_USER="${SSH_USER:-$(id -un)}"
+    read -rp 'Podman service user [gsr-podman]: ' SERVICE_USER
+    SERVICE_USER="${SERVICE_USER:-gsr-podman}"
+    default_root="${XDG_DATA_HOME:-$HOME/.local/share}/gsr-backups"
+    read -rp "Local backup directory [$default_root]: " LOCAL_ROOT
+    LOCAL_ROOT="${LOCAL_ROOT:-$default_root}"
+
+    mkdir -p "$CONFIG_DIR" "$LOCAL_ROOT"
+    chmod 700 "$CONFIG_DIR" "$LOCAL_ROOT"
+    open_connection
+    prompt_sudo_password
+    output="$(remote_first_list)" || fail "cannot list environments on the server"
+    mapfile -t available < <(awk '{print $1}' <<<"$output")
+    ((${#available[@]})) || fail "server reported no environments"
+    printf 'Available environments:\n%s\n' "$output"
+
+    read -rp 'Environments to keep on this computer (comma-separated): ' selected
+    IFS=, read -r -a SELECTED_ENVIRONMENTS <<<"$selected"
+    ((${#SELECTED_ENVIRONMENTS[@]})) || fail "select at least one environment"
+    for index in "${!SELECTED_ENVIRONMENTS[@]}"; do
+        environment="${SELECTED_ENVIRONMENTS[$index]//[[:space:]]/}"
+        SELECTED_ENVIRONMENTS[$index]="$environment"
+        valid_environment "$environment" || fail "invalid environment: $environment"
+        for answer in "${available[@]}"; do
+            [[ "$environment" == "$answer" ]] && break
+        done
+        [[ "$environment" == "$answer" ]] || fail "environment is not available: $environment"
+    done
+    read -rp 'Complete local backups per selected environment [2]: ' count
+    RETENTION="${count:-2}"
+    [[ "$RETENTION" =~ ^[1-9][0-9]*$ ]] || fail "retention must be at least 1"
+    write_config "$(IFS=,; echo "${SELECTED_ENVIRONMENTS[*]}")"
+    echo "Saved private pull configuration in $CONFIG_FILE."
+}
+
+rotate_snapshots() {
+    local environment="$1" root="$LOCAL_ROOT/$environment" snapshots="$root/snapshots" new_id="$2" old_current old_id
+    old_current="$(readlink "$root/current" 2>/dev/null || true)"
+    old_id="${old_current#snapshots/}"
+
+    ln -s "snapshots/$new_id" "$root/.current.new"
+    mv -Tf "$root/.current.new" "$root/current"
+    if [[ "$RETENTION" -ge 2 && "$old_current" == snapshots/* && -d "$snapshots/$old_id" ]]; then
+        ln -s "$old_current" "$root/.previous.new"
+        mv -Tf "$root/.previous.new" "$root/previous"
+    else
+        rm -f "$root/previous"
+    fi
+    mapfile -t old < <(find "$snapshots" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r | tail -n +$((RETENTION + 1)))
+    for old_id in "${old[@]}"; do
+        [[ "$old_id" == "$new_id" ]] && continue
+        rm -rf -- "$snapshots/$old_id"
+    done
+}
+
+pull() {
+    local environment="$1" root snapshots stage snapshot new_id expected_bytes
+    environment_is_selected "$environment" || fail "$environment is not selected in $CONFIG_FILE"
+    valid_environment "$environment" || fail "invalid environment: $environment"
+    command -v zstd >/dev/null || fail "zstd is required"
+    command -v tar >/dev/null || fail "tar is required"
+
+    root="$LOCAL_ROOT/$environment"
+    snapshots="$root/snapshots"
+    mkdir -p "$snapshots"
+    chmod 700 "$LOCAL_ROOT" "$root" "$snapshots"
+    stage="$(mktemp -d "$snapshots/.staging.XXXXXX")"
+    STAGING_DIR="$stage"
+
+    open_connection
+    prompt_sudo_password
+    remote_first_command share-info "$environment" > "$stage/manifest.json"
+    expected_bytes="$(python3 - "$stage/manifest.json" "$environment" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+if payload.get("environment") != sys.argv[2]:
+    raise SystemExit("environment does not match")
+if not isinstance(payload.get("archive_bytes"), int) or payload["archive_bytes"] < 1:
+    raise SystemExit("invalid archive size")
+print(payload["archive_bytes"])
+PY
+)" || fail "server returned an invalid manifest"
+
+    mkdir -p "$stage/snapshot"
+    echo "Downloading verified backup of $environment; keep this terminal and connection open."
+    remote_command '-n' share-bundle "$environment" |
+        python3 "$PROGRESS_TOOL" "$expected_bytes" |
+        tar -xf - -C "$stage/snapshot" --no-same-owner --no-same-permissions
+    [[ -f "$stage/snapshot/manifest.json" ]] || fail "server bundle is incomplete"
+    cmp -s "$stage/manifest.json" "$stage/snapshot/manifest.json" || \
+        fail "server backup changed during transfer; no local backup was stored"
+    verify_snapshot "$stage/snapshot"
+    rm -f "$stage/manifest.json"
+
+    new_id="$(date --utc +%Y%m%dT%H%M%SZ)-$(date --utc +%N)"
+    snapshot="$snapshots/$new_id"
+    mv "$stage/snapshot" "$snapshot"
+    rmdir "$stage"
+    stage=""
+    STAGING_DIR=""
+    rotate_snapshots "$environment" "$new_id"
+    echo "Stored verified local backup: $environment/$new_id"
+}
+
+world_from_manifest() {
+    local manifest="$1"
+    python3 - "$manifest" <<'PY'
+import json, sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+world = payload.get("world_directory")
+if isinstance(world, str) and world:
+    print(world)
+PY
+}
+
+world_from_server_properties() {
+    local archive="$1" entry
+    entry="$(zstd -dcq "$archive" | tar -tf - | awk '{clean=$0; sub(/^\.\//, "", clean); if (clean == "server.properties") {print $0; exit}}')"
+    [[ -n "$entry" ]] || return 1
+    zstd -dcq "$archive" | tar -xOf - "$entry" | sed -nE 's/^level-name=([^[:space:]#]+).*/\1/p' | head -n1
+}
+
+export_world() {
+    local environment="$1" reference="$2" destination="$3" snapshot world archive stage entry_list
+    environment_is_selected "$environment" || fail "$environment is not selected in $CONFIG_FILE"
+    snapshot="$(snapshot_directory "$environment" "$reference")" || fail "unknown local snapshot: $environment/$reference"
+    verify_snapshot "$snapshot"
+    archive="$snapshot/volume.tar.zst"
+    world="$(world_from_manifest "$snapshot/manifest.json")"
+    [[ -n "$world" ]] || world="$(world_from_server_properties "$archive")" || \
+        fail "cannot determine the world directory from this older backup"
+    [[ "$world" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || fail "unsafe world directory in backup"
+
+    mkdir -p "$destination"
+    [[ ! -e "$destination/$world" ]] || fail "destination already contains $world"
+    stage="$(mktemp -d "$destination/.gsr-world.XXXXXX")"
+    STAGING_DIR="$stage"
+    entry_list="$stage/files.txt"
+    # Select the directory entry itself. GNU tar extracts all of its children
+    # in one forward pass; handing every child back through -T would make tar
+    # try to seek backwards through a stream and report false missing files.
+    zstd -dcq "$archive" | tar -tf - | awk -v world="$world" '
+        { clean=$0; sub(/^\.\//, "", clean); sub(/\/$/, "", clean) }
+        clean == world { print $0; exit }
+    ' > "$entry_list"
+    [[ -s "$entry_list" ]] || fail "world directory is not present in the archive: $world"
+    if ! zstd -dcq "$archive" | tar -xf - -C "$stage" --verbatim-files-from \
+        -T "$entry_list" --no-same-owner --no-same-permissions; then
+        fail "could not extract the world directory from the archive"
+        return 1
+    fi
+    [[ -f "$stage/$world/level.dat" ]] || fail "exported world has no level.dat"
+    mv "$stage/$world" "$destination/$world"
+    rm -f "$entry_list"
+    rmdir "$stage"
+    stage=""
+    STAGING_DIR=""
+    echo "Exported world to $destination/$world"
+}
+
+restore_server() {
+    local environment="$1" reference="$2" snapshot confirmation remote
+
+    environment_is_selected "$environment" || fail "$environment is not selected in $CONFIG_FILE"
+    snapshot="$(snapshot_directory "$environment" "$reference")" || fail "unknown local snapshot: $environment/$reference"
+    verify_snapshot "$snapshot"
+    echo "This will stop $environment on $SSH_HOST, create a rollback backup there,"
+    echo "and replace its live Podman volume with local snapshot $reference."
+    read -rp "Type RESTORE-$environment to continue: " confirmation
+    [[ "$confirmation" == "RESTORE-$environment" ]] || {
+        echo "Restore cancelled."
+        return 0
+    }
+
+    open_connection
+    prompt_sudo_password
+    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr-backup receive-restore %q' \
+        "$SERVICE_USER" "$SERVICE_USER" "$environment"
+    if [[ -d "$snapshot/shared" ]]; then
+        {
+            printf '%s\n' "$SUDO_PASSWORD"
+            tar -C "$snapshot" -cf - manifest.json volume.tar.zst volume.tar.zst.sha256 shared
+        } | ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
+    else
+        {
+            printf '%s\n' "$SUDO_PASSWORD"
+            tar -C "$snapshot" -cf - manifest.json volume.tar.zst volume.tar.zst.sha256
+        } | ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
+    fi
+    unset SUDO_PASSWORD
+    echo "Server restore completed for $environment."
+}
+
+show_list() {
+    local environment root current previous
+    for environment in "${SELECTED_ENVIRONMENTS[@]}"; do
+        root="$LOCAL_ROOT/$environment"
+        current="$(readlink "$root/current" 2>/dev/null || printf 'no backup')"
+        previous="$(readlink "$root/previous" 2>/dev/null || true)"
+        printf '%-16s current: %-40s' "$environment" "$current"
+        [[ -z "$previous" ]] || printf ' previous: %s' "$previous"
+        printf '\n'
+    done
+}
+
+case "${1:-}" in
+    setup)
+        [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+        setup
+        ;;
+    list)
+        [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+        load_config
+        show_list
+        ;;
+    pull)
+        [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+        load_config
+        pull "$2"
+        ;;
+    verify)
+        [[ $# -eq 2 || $# -eq 3 ]] || { usage >&2; exit 2; }
+        load_config
+        snapshot="$(snapshot_directory "$2" "${3:-current}")" || fail "unknown local snapshot"
+        verify_snapshot "$snapshot"
+        echo "Local backup is valid: $2/${3:-current}"
+        ;;
+    export-world)
+        [[ $# -eq 4 ]] || { usage >&2; exit 2; }
+        load_config
+        export_world "$2" "$3" "$4"
+        ;;
+    restore-server)
+        [[ $# -eq 3 ]] || { usage >&2; exit 2; }
+        load_config
+        restore_server "$2" "$3"
+        ;;
+    -h|--help|help|'')
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

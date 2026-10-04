@@ -10,6 +10,7 @@
   - Fetches the matching modpack automatically
   - Bootstrap script for both fresh installs and infrastructure updates
 - `scripts/switch-environment.sh` switches safely between environments
+- `gsr` is the short, grouped server command interface
 - `mc-whitelist` maintains one private whitelist for every environment
 - `gsr-backup` keeps one verified full-volume backup per environment
 - Worlds, player data and runtime configuration remain separate per environment
@@ -22,6 +23,24 @@
 | Skyblock | 26.2 | `skyblock.service` | `skyblock` | `skyblockdata` | `skyblock` |
 
 Both environments use port `25565`; only one may run at a time.
+
+## Server commands
+
+After bootstrap, the grouped command is the normal entry point:
+
+```bash
+gsr help
+gsr environment list
+gsr environment start vanilla
+gsr environment stop vanilla
+gsr environment status vanilla
+gsr whitelist list
+gsr backup list
+```
+
+The existing `switchenv`, `mc-whitelist`, and `gsr-backup` commands remain as
+compatible direct forms. New server management commands should be added below
+the matching `gsr environment`, `gsr whitelist`, or `gsr backup` group.
 
 ## Shared private whitelist
 
@@ -63,12 +82,12 @@ Only the generated whitelist is mounted read-only into Minecraft containers;
 After running bootstrap once, use:
 
 ```bash
-mc-whitelist list
-mc-whitelist add premium PlayerName
-mc-whitelist add offline PlayerName
-mc-whitelist remove PlayerName [premium|offline|all]
-mc-whitelist apply
-mc-whitelist audit
+gsr whitelist list
+gsr whitelist add premium PlayerName
+gsr whitelist add offline PlayerName
+gsr whitelist remove PlayerName [premium|offline|all]
+gsr whitelist apply
+gsr whitelist audit
 ```
 
 `add premium` looks up the global Java UUID at Mojang and also allows the
@@ -110,18 +129,74 @@ automatically. Direct `podman stop` commands bypass this protection. Use
 `systemctl`, `switchenv`, or the bootstrap script for planned maintenance.
 
 ```bash
-gsr-backup list
-gsr-backup verify vanilla
-gsr-backup create skyblock
-gsr-backup restore vanilla restored-vanilla
+gsr backup list
+gsr backup verify vanilla
+gsr backup create skyblock
+gsr backup restore vanilla restored-vanilla
+gsr backup restore-server vanilla
 ```
 
 `create` is only for a stopped environment. The automatic hooks handle running
 environments. `restore` verifies the archive and imports it only into a newly
 created, separately named volume; it refuses to touch the live volume or any
 existing volume. Point an environment at that new volume only after inspecting
-it. The saved `shared/` directory is reference material and is not copied back
+it.
+
+`restore-server` is the explicit server-local rollback command. It asks for a
+confirmation, protects its source temporarily, creates a fresh backup of the
+currently live volume, then replaces the live volume and starts the environment
+again. The fresh server backup becomes the rollback point. Only one full backup
+is retained at rest; the duplicate source exists only while the restore runs.
+The saved `shared/` directory remains reference material and is not copied back
 automatically.
+
+### Manual copies to another computer
+
+Run `scripts/bin/gsr-backup-pull` from a checked-out copy of this repository on
+the computer that should keep its own copies. Its first command creates a
+private local configuration and asks which environments and how many complete
+backups that computer should retain:
+
+```bash
+scripts/bin/gsr-backup-pull setup
+scripts/bin/gsr-backup-pull list
+scripts/bin/gsr-backup-pull pull vanilla
+scripts/bin/gsr-backup-pull verify vanilla current
+```
+
+`setup` stores connection data in `~/.config/gsr-backup-pull/config.json` with
+mode 600. Each computer can select different environments and a different
+retention count; the default is two total snapshots: `current` and `previous`.
+There is no timer and no automatic transfer. A pull asks interactively for the
+normal SSH password and the server's sudo password, then keeps the terminal
+open while it shows transfer progress and an estimate. The local rotation only
+happens after checksum, zstd, tar, and manifest validation succeed. A failed
+transfer removes its temporary files and leaves earlier complete snapshots
+unchanged.
+
+A complete local backup can export just its world directory to any chosen
+directory without assuming a launcher or Minecraft instance layout:
+
+```bash
+scripts/bin/gsr-backup-pull export-world vanilla current /path/to/export
+```
+
+For example, this produces `/path/to/export/world-26.3/`; the user can then
+copy that world folder into the saves location of any suitable launcher. New
+backups record the world directory in their manifest. Older backups fall back
+to `server.properties` inside the archive.
+
+To restore a verified local snapshot back to the selected server environment:
+
+```bash
+scripts/bin/gsr-backup-pull restore-server vanilla previous
+```
+
+This command requires an explicit `RESTORE-<environment>` confirmation. It
+streams the local snapshot directly to a private server staging directory,
+validates it there, and then performs the same protected live-volume restore
+as `gsr backup restore-server`. Interrupted uploads are removed from the
+staging directory; they never become a restore source.
 
 ## Quick install
 ``` bash

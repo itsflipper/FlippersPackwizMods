@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  gsr help [environment|whitelist|backup]
+  gsr environment list
+  gsr environment start <environment>
+  gsr environment stop <environment>
+  gsr environment restart <environment>
+  gsr environment status <environment>
+  gsr whitelist <command> [arguments...]
+  gsr backup <command> [arguments...]
+
+Examples:
+  gsr environment list
+  gsr environment start vanilla
+  gsr whitelist add premium PlayerName
+  gsr backup verify vanilla
+
+The legacy commands switchenv, mc-whitelist and gsr-backup remain available.
+EOF
+}
+
+case "${1:-help}" in
+    help|-h|--help)
+        case "${2:-}" in
+            '') usage ;;
+            environment|env) exec "$SCRIPT_DIR/switchenv" --help ;;
+            whitelist) exec "$SCRIPT_DIR/mc-whitelist" --help ;;
+            backup) exec "$SCRIPT_DIR/gsr-backup" --help ;;
+            *) usage >&2; exit 2 ;;
+        esac
+        ;;
+    environment|env)
+        shift
+        exec "$SCRIPT_DIR/switchenv" "$@"
+        ;;
+    whitelist)
+        shift
+        exec "$SCRIPT_DIR/mc-whitelist" "$@"
+        ;;
+    backup)
+        shift
+        exec "$SCRIPT_DIR/gsr-backup" "$@"
+        ;;
+    *)
+        echo "Unknown gsr command: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

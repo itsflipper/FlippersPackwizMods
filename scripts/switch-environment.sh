@@ -15,6 +15,19 @@ if ((${#ENVIRONMENTS[@]} == 0)); then
   exit 1
 fi
 
+usage() {
+  cat <<'EOF'
+Usage:
+  switchenv list
+  switchenv start <environment>
+  switchenv stop <environment>
+  switchenv restart <environment>
+  switchenv status <environment>
+
+For compatibility, switchenv <environment> means switchenv start <environment>.
+EOF
+}
+
 service_for() {
   local environment="$1"
   local container_files=("$ENVIRONMENTS_ROOT/$environment"/*.container)
@@ -69,48 +82,82 @@ resolve_environment() {
   return 1
 }
 
+require_environment() {
+  local requested="$1"
+
+  if ! environment="$(resolve_environment "$requested")"; then
+    echo "Unknown environment: $requested" >&2
+    show_list
+    exit 2
+  fi
+  if ! service="$(service_for "$environment")"; then
+    echo "Invalid environment: $environment" >&2
+    exit 1
+  fi
+  if ! service_exists "$service"; then
+    echo "$environment is not installed as a systemd service yet." >&2
+    exit 1
+  fi
+}
+
+start_environment() {
+  local other_environment other_service
+
+  if systemctl --user is-active --quiet "$service.service"; then
+    echo "$environment is already active."
+    return 0
+  fi
+
+  echo "Stopping active Minecraft environments ..."
+  for other_environment in "${ENVIRONMENTS[@]}"; do
+    if ! other_service="$(service_for "$other_environment")"; then
+      continue
+    fi
+
+    if service_exists "$other_service" &&
+      systemctl --user is-active --quiet "$other_service.service"; then
+      systemctl --user stop "$other_service.service"
+    fi
+  done
+
+  echo "Starting $environment ($service) ..."
+  systemctl --user start "$service.service"
+  systemctl --user --no-pager --full status "$service.service"
+}
+
 case "${1:-list}" in
   list|ls)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
     show_list
     ;;
-  *)
-    requested="$1"
-
-    if ! environment="$(resolve_environment "$requested")"; then
-      echo "Unknown environment: $requested" >&2
-      show_list
-      exit 2
-    fi
-
-    if ! service="$(service_for "$environment")"; then
-      echo "Invalid environment: $environment" >&2
-      exit 1
-    fi
-
-    if ! service_exists "$service"; then
-      echo "$environment is not installed as a systemd service yet." >&2
-      exit 1
-    fi
-
-    if systemctl --user is-active --quiet "$service.service"; then
-      echo "$environment is already active."
-      exit 0
-    fi
-
-    echo "Stopping active Minecraft environments ..."
-    for other_environment in "${ENVIRONMENTS[@]}"; do
-      if ! other_service="$(service_for "$other_environment")"; then
-        continue
-      fi
-
-      if service_exists "$other_service" &&
-        systemctl --user is-active --quiet "$other_service.service"; then
-        systemctl --user stop "$other_service.service"
-      fi
-    done
-
-    echo "Starting $environment ($service) ..."
-    systemctl --user start "$service.service"
+  start)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    require_environment "$2"
+    start_environment
+    ;;
+  stop)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    require_environment "$2"
+    systemctl --user stop "$service.service"
+    echo "Stopped $environment ($service)."
+    ;;
+  restart)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    require_environment "$2"
+    systemctl --user restart "$service.service"
     systemctl --user --no-pager --full status "$service.service"
+    ;;
+  status)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    require_environment "$2"
+    systemctl --user --no-pager --full status "$service.service"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+    require_environment "$1"
+    start_environment
     ;;
 esac

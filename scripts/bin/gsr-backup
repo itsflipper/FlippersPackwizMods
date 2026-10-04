@@ -8,6 +8,31 @@ DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 BACKUP_ROOT="$DATA_HOME/gsr/backups"
 MARKER_ROOT="$STATE_HOME/gsr/backup-prepared"
+RESTORE_SOURCE_STAGE=""
+RESTORE_INCOMING_STAGE=""
+
+cleanup_restore_staging() {
+    [[ -z "$RESTORE_SOURCE_STAGE" ]] || rm -rf -- "$RESTORE_SOURCE_STAGE"
+    [[ -z "$RESTORE_INCOMING_STAGE" ]] || rm -rf -- "$RESTORE_INCOMING_STAGE"
+}
+
+trap cleanup_restore_staging EXIT
+
+# A command reached through sudo -u does not necessarily inherit the service
+# user's runtime directory. Podman and future restore commands need it when
+# the backup tool is called remotely.
+setup_user_runtime() {
+    local runtime
+    runtime="/run/user/$(id -u)"
+    if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "$runtime" ]]; then
+        export XDG_RUNTIME_DIR="$runtime"
+    fi
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -S "${XDG_RUNTIME_DIR:-}/bus" ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    fi
+}
+
+setup_user_runtime
 
 usage() {
     cat <<'EOF'
@@ -17,7 +42,13 @@ Usage:
   gsr-backup create <environment>
   gsr-backup verify <environment>
   gsr-backup restore <environment> <new-volume>
+  gsr-backup restore-server <environment>
   gsr-backup list
+
+Transport helpers (used by gsr-backup-pull only):
+  gsr-backup share-info <environment>
+  gsr-backup share-bundle <environment>
+  gsr-backup receive-restore <environment>
 
 prepare and finalize are systemd stop hooks. create only exports an environment
 whose container is already stopped. Each environment keeps one verified local
@@ -50,9 +81,11 @@ load_environment() {
     BACKUP_CONTAINER="$(sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$file" | head -n1)"
     BACKUP_VOLUME="$(sed -nE 's#^Volume=([^:[:space:]]+):/data(:[^[:space:]]*)?$#\1#p' "$file" | head -n1)"
     BACKUP_VERSION="$(sed -nE 's/^Environment=VERSION=([^[:space:]#]+).*/\1/p' "$file" | head -n1)"
+    BACKUP_WORLD="$(sed -nE 's/^Environment=LEVEL=([^[:space:]#]+).*/\1/p' "$file" | head -n1)"
+    BACKUP_SERVICE="$(basename "$file" .container)"
 
-    [[ -n "$BACKUP_CONTAINER" && -n "$BACKUP_VOLUME" && -n "$BACKUP_VERSION" ]] || {
-        fail "cannot determine container, /data volume, or Minecraft version for $environment"
+    [[ -n "$BACKUP_CONTAINER" && -n "$BACKUP_VOLUME" && -n "$BACKUP_VERSION" && -n "$BACKUP_WORLD" ]] || {
+        fail "cannot determine container, /data volume, Minecraft version, or world for $environment"
         return 1
     }
 
@@ -90,7 +123,7 @@ write_manifest() {
     local target="$1" archive_name="$2" digest="$3" archive_size="$4" created_at="$5" commit
 
     commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
-    python3 - "$target" "$BACKUP_ENVIRONMENT" "$BACKUP_VOLUME" "$BACKUP_VERSION" \
+    python3 - "$target" "$BACKUP_ENVIRONMENT" "$BACKUP_VOLUME" "$BACKUP_VERSION" "$BACKUP_WORLD" \
         "$archive_name" "$digest" "$archive_size" "$created_at" "$commit" <<'PY'
 import json
 import pathlib
@@ -99,14 +132,15 @@ import sys
 path = pathlib.Path(sys.argv[1])
 payload = {
     "schema_version": 1,
-    "created_at": sys.argv[8],
+    "created_at": sys.argv[9],
     "environment": sys.argv[2],
     "volume": sys.argv[3],
     "minecraft_version": sys.argv[4],
-    "archive": sys.argv[5],
-    "sha256": sys.argv[6],
-    "archive_bytes": int(sys.argv[7]),
-    "repository_commit": sys.argv[9],
+    "world_directory": sys.argv[5],
+    "archive": sys.argv[6],
+    "sha256": sys.argv[7],
+    "archive_bytes": int(sys.argv[8]),
+    "repository_commit": sys.argv[10],
     "includes": [
         "complete Podman /data volume",
         "private shared identities and whitelist source",
@@ -118,7 +152,7 @@ PY
 }
 
 copy_shared_identity_source() {
-    local destination="$1" config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+    local destination="$1" config_home="${XDG_CONFIG_HOME:-$HOME/.config}" source
     local shared="$config_home/gsr/shared"
 
     mkdir -p "$destination"
@@ -148,6 +182,20 @@ verify_snapshot() {
     zstd -tq "$archive"
     zstd -dcq "$archive" | tar -tf - >/dev/null
     python3 -m json.tool "$snapshot/manifest.json" >/dev/null
+}
+
+verify_snapshot_environment() {
+    local snapshot="$1" expected_environment="$2"
+
+    verify_snapshot "$snapshot"
+    python3 - "$snapshot/manifest.json" "$expected_environment" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+if payload.get("environment") != sys.argv[2]:
+    raise SystemExit("backup environment does not match")
+PY
 }
 
 remove_old_snapshots() {
@@ -235,6 +283,37 @@ verify_current() {
     echo "gsr-backup: current backup for $BACKUP_ENVIRONMENT is valid."
 }
 
+current_snapshot() {
+    local current
+
+    current="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
+    [[ -n "$current" && -d "$current" ]] || fail "no current backup for $BACKUP_ENVIRONMENT"
+    verify_snapshot "$current"
+    printf '%s\n' "$current"
+}
+
+share_info() {
+    local current
+
+    load_environment "$1"
+    current="$(current_snapshot)"
+    cat "$current/manifest.json"
+}
+
+share_bundle() {
+    local current
+
+    load_environment "$1"
+    current="$(current_snapshot)"
+    # stdout is deliberately binary-only. This is consumed over SSH by the
+    # local pull tool; diagnostics remain on stderr through fail()/tar.
+    if [[ -d "$current/shared" ]]; then
+        tar -C "$current" -cf - manifest.json volume.tar.zst volume.tar.zst.sha256 shared
+    else
+        tar -C "$current" -cf - manifest.json volume.tar.zst volume.tar.zst.sha256
+    fi
+}
+
 restore_current() {
     local environment="$1" target_volume="$2" current
 
@@ -262,6 +341,101 @@ restore_current() {
         return 1
     fi
     echo "gsr-backup: restored $BACKUP_ENVIRONMENT into new volume $target_volume."
+}
+
+restore_live_from_snapshot() {
+    local environment="$1" source="$2" protected_source="" pre_restore current_before current_after
+
+    load_environment "$environment"
+    verify_snapshot_environment "$source" "$environment"
+
+    # The automatic stop hook rotates the one server-local snapshot. Protect a
+    # source from that snapshot directory before stopping the service.
+    if [[ "$source" == "$SNAPSHOT_DIR"/* ]]; then
+        protected_source="$(mktemp -d "$BACKUP_DIR/.restore-source.XXXXXX")"
+        cp -a "$source/." "$protected_source/"
+        source="$protected_source"
+    fi
+
+    RESTORE_SOURCE_STAGE="$protected_source"
+    current_before="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
+
+    if systemctl --user is-active --quiet "$BACKUP_SERVICE.service"; then
+        echo "gsr-backup: stopping $BACKUP_ENVIRONMENT and creating a rollback backup ..."
+        systemctl --user stop "$BACKUP_SERVICE.service"
+    else
+        # A stopped service bypasses the stop hook, so make the rollback backup
+        # explicitly before modifying the named live volume.
+        create_backup false
+    fi
+    if container_running; then
+        fail "$BACKUP_ENVIRONMENT is still running after stop"
+        return 1
+    fi
+    # Stop hooks intentionally keep the previous snapshot if their export
+    # fails. A restore must never rely on that ambiguous result: if the hook
+    # did not rotate current, create and verify the rollback backup ourselves.
+    current_after="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
+    if [[ -z "$current_after" || "$current_after" == "$current_before" ]]; then
+        create_backup false
+    fi
+    pre_restore="$(current_snapshot)"
+
+    echo "gsr-backup: replacing live volume $BACKUP_VOLUME from the verified backup ..."
+    podman volume rm "$BACKUP_VOLUME"
+    podman volume create "$BACKUP_VOLUME" >/dev/null
+    if ! zstd -dcq "$source/volume.tar.zst" | podman volume import "$BACKUP_VOLUME" -; then
+        echo "gsr-backup: restore import failed; attempting rollback volume recovery ..." >&2
+        podman volume rm "$BACKUP_VOLUME" || true
+        podman volume create "$BACKUP_VOLUME" >/dev/null
+        if ! zstd -dcq "$pre_restore/volume.tar.zst" | podman volume import "$BACKUP_VOLUME" -; then
+            fail "restore and automatic rollback both failed; service remains stopped"
+            return 1
+        fi
+        fail "restore failed; the pre-restore volume was recovered and remains stopped"
+        return 1
+    fi
+
+    systemctl --user start "$BACKUP_SERVICE.service"
+    [[ -z "$protected_source" ]] || rm -rf -- "$protected_source"
+    RESTORE_SOURCE_STAGE=""
+    echo "gsr-backup: $BACKUP_ENVIRONMENT now runs from the restored volume."
+    echo "gsr-backup: the current server backup is the pre-restore rollback point."
+}
+
+restore_server_current() {
+    local environment="$1" current confirmation
+
+    load_environment "$environment"
+    current="$(current_snapshot)"
+    echo "This replaces the live volume $BACKUP_VOLUME with the current local backup."
+    echo "A fresh rollback backup of the live volume will be created first."
+    read -rp "Type RESTORE-$environment to continue: " confirmation
+    [[ "$confirmation" == "RESTORE-$environment" ]] || {
+        echo "gsr-backup: restore cancelled."
+        return 0
+    }
+    restore_live_from_snapshot "$environment" "$current"
+}
+
+receive_restore() {
+    local environment="$1" stage
+
+    load_environment "$environment"
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_ROOT" "$BACKUP_DIR"
+    stage="$(mktemp -d "$BACKUP_DIR/.incoming-restore.XXXXXX")"
+    RESTORE_INCOMING_STAGE="$stage"
+
+    # The client sends a tar containing exactly a verified snapshot's public
+    # backup files. Extraction stays inside a private staging directory until
+    # all integrity checks pass.
+    tar -xf - -C "$stage" --no-same-owner --no-same-permissions
+    verify_snapshot_environment "$stage" "$environment"
+    restore_live_from_snapshot "$environment" "$stage"
+    rm -rf -- "$stage"
+    RESTORE_INCOMING_STAGE=""
+    echo "gsr-backup: received and restored verified backup for $environment."
 }
 
 show_list() {
@@ -295,9 +469,24 @@ case "${1:-}" in
         [[ $# -eq 3 ]] || { usage >&2; exit 2; }
         restore_current "$2" "$3"
         ;;
+    restore-server)
+        [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+        restore_server_current "$2"
+        ;;
     list)
         [[ $# -eq 1 ]] || { usage >&2; exit 2; }
         show_list
+        ;;
+    share-info|share-bundle)
+        [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+        case "$1" in
+            share-info) share_info "$2" ;;
+            share-bundle) share_bundle "$2" ;;
+        esac
+        ;;
+    receive-restore)
+        [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+        receive_restore "$2"
         ;;
     -h|--help|help|'')
         usage
