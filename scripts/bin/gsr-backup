@@ -461,7 +461,7 @@ verify_imported_test_volume() {
     # Exporting only lists the newly created test volume. It never mounts or
     # modifies the live volume, and confirms that the essential server and
     # world files survived the upload and Podman import.
-    if ! podman volume export "$volume" - | tar -tf - | awk -v world="$BACKUP_WORLD" '
+    if ! podman volume export "$volume" | tar -tf - | awk -v world="$BACKUP_WORLD" '
         {
             clean = $0
             sub(/^\.\//, "", clean)
