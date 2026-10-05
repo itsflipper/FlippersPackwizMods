@@ -36,6 +36,14 @@ setup_user_runtime() {
 
 setup_user_runtime
 
+# sudo -H changes HOME but intentionally keeps the caller's working directory.
+# Podman must not be launched from an SSH user's private home that the service
+# user cannot enter, especially while importing a streamed backup.
+if ! cd "$HOME"; then
+    echo "gsr-backup: cannot enter service home: $HOME" >&2
+    exit 1
+fi
+
 usage() {
     cat <<'EOF'
 Usage:
