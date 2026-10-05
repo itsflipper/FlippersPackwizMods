@@ -110,6 +110,15 @@ container_running() {
     podman inspect -f '{{.State.Running}}' "$BACKUP_CONTAINER" 2>/dev/null | grep -qx true
 }
 
+rcon_command() {
+    podman exec "$BACKUP_CONTAINER" sh -ceu '
+        password="$(sed -n "s/^rcon.password=//p" /data/server.properties)"
+        [ -n "$password" ] || { echo "gsr-backup: no rcon.password in /data/server.properties" >&2; exit 1; }
+        export RCON_PASSWORD="$password"
+        exec rcon-cli "$@"
+    ' sh "$@"
+}
+
 prepare() {
     load_environment "$1"
     mkdir -p "$MARKER_ROOT"
@@ -121,7 +130,7 @@ prepare() {
         return 0
     fi
 
-    if ! podman exec "$BACKUP_CONTAINER" rcon-cli 'save-all flush'; then
+    if ! rcon_command 'save-all flush'; then
         echo "gsr-backup: cannot flush $BACKUP_ENVIRONMENT; preserving the previous backup." >&2
         return 0
     fi

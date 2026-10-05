@@ -193,7 +193,12 @@ case "${1:-status}" in
     require_one_active
     CONTAINER="$(container_for "$ENVIRONMENT")"
     [[ -n "$CONTAINER" ]] || { echo "Cannot determine container for $ENVIRONMENT." >&2; exit 1; }
-    exec podman exec -it "$CONTAINER" rcon-cli
+    exec podman exec -it "$CONTAINER" sh -ceu '
+      password="$(sed -n "s/^rcon.password=//p" /data/server.properties)"
+      [ -n "$password" ] || { echo "gsr: no rcon.password in /data/server.properties" >&2; exit 1; }
+      export RCON_PASSWORD="$password"
+      exec rcon-cli
+    '
     ;;
   help|-h|--help)
     usage
