@@ -18,6 +18,7 @@ def human_size(value: float) -> str:
 
 def main() -> int:
     expected = int(sys.argv[1])
+    label = sys.argv[2] if len(sys.argv) > 2 else "Download"
     copied = 0
     started = last_report = time.monotonic()
     source = sys.stdin.buffer
@@ -33,7 +34,7 @@ def main() -> int:
             remaining = max(expected - copied, 0)
             eta = remaining / rate if rate else 0
             print(
-                f"\rDownload: {human_size(copied)} / etwa {human_size(expected)} "
+                f"\r{label}: {human_size(copied)} / etwa {human_size(expected)} "
                 f"({human_size(rate)}/s, noch etwa {eta:.0f}s)",
                 end="",
                 file=sys.stderr,
@@ -43,7 +44,7 @@ def main() -> int:
 
     destination.flush()
     print(
-        f"\rDownload abgeschlossen: {human_size(copied)} "
+        f"\r{label} abgeschlossen: {human_size(copied)} "
         f"(Archivgröße: {human_size(expected)}){' ' * 24}",
         file=sys.stderr,
         flush=True,

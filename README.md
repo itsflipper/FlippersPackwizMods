@@ -204,6 +204,22 @@ validates it there, and then performs the same protected live-volume restore
 as `gsr backup restore-server`. Interrupted uploads are removed from the
 staging directory; they never become a restore source.
 
+Before using a live restore, test the PC-to-server transfer and Podman import
+without stopping Minecraft or touching the live volume:
+
+```bash
+scripts/bin/gsr-backup-pull upload-test vanilla current
+```
+
+It requires `UPLOAD-TEST-<environment>` confirmation, transfers the verified
+snapshot into a newly named `gsr-upload-test-...` volume, and checks that the
+import contains both `server.properties` and the selected world's `level.dat`.
+The test volume is never attached to a container. Remove it after inspection:
+
+```bash
+gsr backup remove-test-volume vanilla gsr-upload-test-vanilla-<id>
+```
+
 ## Quick install
 ``` bash
 curl -fsSL https://raw.githubusercontent.com/itsflipper/FlippersPackwizMods/refs/heads/main/gsr/bootstrap.sh -o /tmp/bootstrap.sh && bash /tmp/bootstrap.sh

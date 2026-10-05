@@ -10,10 +10,12 @@ BACKUP_ROOT="$DATA_HOME/gsr/backups"
 MARKER_ROOT="$STATE_HOME/gsr/backup-prepared"
 RESTORE_SOURCE_STAGE=""
 RESTORE_INCOMING_STAGE=""
+TEST_VOLUME=""
 
 cleanup_restore_staging() {
     [[ -z "$RESTORE_SOURCE_STAGE" ]] || rm -rf -- "$RESTORE_SOURCE_STAGE"
     [[ -z "$RESTORE_INCOMING_STAGE" ]] || rm -rf -- "$RESTORE_INCOMING_STAGE"
+    [[ -z "$TEST_VOLUME" ]] || podman volume rm "$TEST_VOLUME" >/dev/null 2>&1 || true
 }
 
 trap cleanup_restore_staging EXIT
@@ -43,12 +45,14 @@ Usage:
   gsr-backup verify <environment>
   gsr-backup restore <environment> <new-volume>
   gsr-backup restore-server <environment>
+  gsr-backup remove-test-volume <environment> <volume>
   gsr-backup list
 
 Transport helpers (used by gsr-backup-pull only):
   gsr-backup share-info <environment>
   gsr-backup share-bundle <environment>
   gsr-backup receive-restore <environment>
+  gsr-backup receive-test <environment> <new-volume>
 
 prepare and finalize are systemd stop hooks. create only exports an environment
 whose container is already stopped. Each environment keeps one verified local
@@ -438,6 +442,91 @@ receive_restore() {
     echo "gsr-backup: received and restored verified backup for $environment."
 }
 
+valid_test_volume() {
+    local volume="$1"
+    [[ "$volume" =~ ^gsr-upload-test-${BACKUP_ENVIRONMENT}-[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]]
+}
+
+verify_imported_test_volume() {
+    local volume="$1"
+
+    # Exporting only lists the newly created test volume. It never mounts or
+    # modifies the live volume, and confirms that the essential server and
+    # world files survived the upload and Podman import.
+    if ! podman volume export "$volume" - | tar -tf - | awk -v world="$BACKUP_WORLD" '
+        {
+            clean = $0
+            sub(/^\.\//, "", clean)
+            if (clean == "server.properties") server_properties = 1
+            if (clean == world "/level.dat") level_data = 1
+        }
+        END { exit !(server_properties && level_data) }
+    '; then
+        fail "imported test volume is missing server.properties or $BACKUP_WORLD/level.dat"
+        return 1
+    fi
+}
+
+receive_test() {
+    local environment="$1" target_volume="$2" stage
+
+    load_environment "$environment"
+    valid_test_volume "$target_volume" || {
+        fail "invalid test volume name: $target_volume"
+        return 1
+    }
+    [[ "$target_volume" != "$BACKUP_VOLUME" ]] || {
+        fail "test import refuses the live volume: $BACKUP_VOLUME"
+        return 1
+    }
+    if podman volume exists "$target_volume"; then
+        fail "test volume already exists: $target_volume"
+        return 1
+    fi
+
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_ROOT" "$BACKUP_DIR"
+    stage="$(mktemp -d "$BACKUP_DIR/.incoming-test.XXXXXX")"
+    RESTORE_INCOMING_STAGE="$stage"
+
+    tar -xf - -C "$stage" --no-same-owner --no-same-permissions
+    verify_snapshot_environment "$stage" "$environment"
+
+    echo "gsr-backup: importing verified upload into test volume $target_volume ..."
+    podman volume create "$target_volume" >/dev/null
+    TEST_VOLUME="$target_volume"
+    if ! zstd -dcq "$stage/volume.tar.zst" | podman volume import "$target_volume" -; then
+        fail "test volume import failed; the partial test volume will be removed"
+        return 1
+    fi
+    verify_imported_test_volume "$target_volume"
+
+    rm -rf -- "$stage"
+    RESTORE_INCOMING_STAGE=""
+    TEST_VOLUME=""
+    echo "gsr-backup: upload test succeeded in volume $target_volume."
+}
+
+remove_test_volume() {
+    local environment="$1" target_volume="$2"
+
+    load_environment "$environment"
+    valid_test_volume "$target_volume" || {
+        fail "refusing to remove a non-test volume: $target_volume"
+        return 1
+    }
+    if ! podman volume exists "$target_volume"; then
+        fail "test volume does not exist: $target_volume"
+        return 1
+    fi
+    if podman ps --all --filter "volume=$target_volume" --format '{{.ID}}' | grep -q .; then
+        fail "test volume is attached to a container: $target_volume"
+        return 1
+    fi
+    podman volume rm "$target_volume" >/dev/null
+    echo "gsr-backup: removed test volume $target_volume."
+}
+
 show_list() {
     local environment current
 
@@ -473,6 +562,10 @@ case "${1:-}" in
         [[ $# -eq 2 ]] || { usage >&2; exit 2; }
         restore_server_current "$2"
         ;;
+    remove-test-volume)
+        [[ $# -eq 3 ]] || { usage >&2; exit 2; }
+        remove_test_volume "$2" "$3"
+        ;;
     list)
         [[ $# -eq 1 ]] || { usage >&2; exit 2; }
         show_list
@@ -487,6 +580,10 @@ case "${1:-}" in
     receive-restore)
         [[ $# -eq 2 ]] || { usage >&2; exit 2; }
         receive_restore "$2"
+        ;;
+    receive-test)
+        [[ $# -eq 3 ]] || { usage >&2; exit 2; }
+        receive_test "$2" "$3"
         ;;
     -h|--help|help|'')
         usage

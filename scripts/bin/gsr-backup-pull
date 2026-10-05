@@ -29,6 +29,7 @@ Usage:
   gsr-backup-pull pull <environment>
   gsr-backup-pull verify <environment> [current|previous|snapshot-id]
   gsr-backup-pull export-world <environment> <current|previous|snapshot-id> <destination-directory>
+  gsr-backup-pull upload-test <environment> <current|previous|snapshot-id>
   gsr-backup-pull restore-server <environment> <current|previous|snapshot-id>
 
 setup stores this computer's private connection settings, selected environments,
@@ -461,6 +462,48 @@ restore_server() {
     echo "Server restore completed for $environment."
 }
 
+stream_snapshot_to_server() {
+    local snapshot="$1" remote="$2" label="$3" archive_bytes
+
+    archive_bytes="$(stat -c %s "$snapshot/volume.tar.zst")"
+    {
+        printf '%s\n' "$SUDO_PASSWORD"
+        {
+            if [[ -d "$snapshot/shared" ]]; then
+                tar -C "$snapshot" -cf - manifest.json volume.tar.zst volume.tar.zst.sha256 shared
+            else
+                tar -C "$snapshot" -cf - manifest.json volume.tar.zst volume.tar.zst.sha256
+            fi
+        } | python3 "$PROGRESS_TOOL" "$archive_bytes" "$label"
+    } | ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
+}
+
+upload_test() {
+    local environment="$1" reference="$2" snapshot confirmation remote test_volume
+
+    environment_is_selected "$environment" || fail "$environment is not selected in $CONFIG_FILE"
+    snapshot="$(snapshot_directory "$environment" "$reference")" || fail "unknown local snapshot: $environment/$reference"
+    verify_snapshot "$snapshot"
+    test_volume="gsr-upload-test-$environment-$(date --utc +%Y%m%dT%H%M%SZ)-$(date --utc +%N)"
+
+    echo "This uploads and imports $environment/$reference into the new test volume $test_volume."
+    echo "It does not stop $environment and cannot replace its live volume."
+    read -rp "Type UPLOAD-TEST-$environment to continue: " confirmation
+    [[ "$confirmation" == "UPLOAD-TEST-$environment" ]] || {
+        echo "Upload test cancelled."
+        return 0
+    }
+
+    open_connection
+    prompt_sudo_password
+    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr-backup receive-test %q %q' \
+        "$SERVICE_USER" "$SERVICE_USER" "$environment" "$test_volume"
+    stream_snapshot_to_server "$snapshot" "$remote" Upload
+    unset SUDO_PASSWORD
+    echo "Upload test completed in server volume $test_volume."
+    echo "Remove it after inspection with: gsr backup remove-test-volume $environment $test_volume"
+}
+
 show_list() {
     local environment root current previous
     for environment in "${SELECTED_ENVIRONMENTS[@]}"; do
@@ -503,6 +546,11 @@ case "${1:-}" in
         [[ $# -eq 4 ]] || { usage >&2; exit 2; }
         load_config
         export_world "$2" "$3" "$4"
+        ;;
+    upload-test)
+        [[ $# -eq 3 ]] || { usage >&2; exit 2; }
+        load_config
+        upload_test "$2" "$3"
         ;;
     restore-server)
         [[ $# -eq 3 ]] || { usage >&2; exit 2; }
