@@ -282,13 +282,18 @@ finalize() {
     }
     rm -f "$MARKER_FILE"
 
-    if [[ "${SERVICE_RESULT:-success}" != success ]]; then
-        echo "gsr-backup: $BACKUP_ENVIRONMENT stopped unsuccessfully; previous backup kept." >&2
-        return 0
-    fi
     if container_running; then
         echo "gsr-backup: $BACKUP_ENVIRONMENT still runs; previous backup kept." >&2
         return 0
+    fi
+
+    # Quadlet's generated stop path ends the container through `podman rm -f`.
+    # systemd can therefore report `signal` for an intentional, clean stop.
+    # The prepared marker is only written after a successful RCON save-all
+    # flush, and a stopped container is verified above, so those are the
+    # relevant safety conditions for exporting the volume.
+    if [[ "${SERVICE_RESULT:-success}" != success ]]; then
+        echo "gsr-backup: $BACKUP_ENVIRONMENT stopped with systemd result ${SERVICE_RESULT:-unknown} after clean flush; exporting backup."
     fi
 
     create_backup true
