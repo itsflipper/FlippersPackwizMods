@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Read-only consistency checks for Minecraft identity data.
+
+The server deliberately runs in offline mode.  Therefore the deterministic
+OfflinePlayer UUID is the canonical UUID for live player data, independently
+of a player's Mojang UUID or EasyAuth's online-account marker.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+
+SCRIPT_PATH = Path(__file__).resolve()
+REPO_ROOT = SCRIPT_PATH.parents[2]
+ENVIRONMENTS_ROOT = REPO_ROOT / "environments"
+IDENTITIES = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "gsr" / "shared" / "identities.json"
+PODMAN = os.environ.get("PODMAN_BIN", "podman")
+
+
+def fail(message: str) -> None:
+    print(f"gsr-identity: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def usage() -> None:
+    print(
+        """Usage:
+  gsr-identity audit <environment>
+
+Read-only audit of identities.json, the environment's EasyAuth database, and
+player data. It never changes a whitelist, EasyAuth entry, player file, volume,
+or running Minecraft server."""
+    )
+
+
+def load_environment(environment: str) -> tuple[str, str, str]:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", environment):
+        fail(f"invalid environment: {environment}")
+    files = list((ENVIRONMENTS_ROOT / environment).glob("*.container"))
+    if len(files) != 1:
+        fail(f"unknown or invalid environment: {environment}")
+    contents = files[0].read_text(encoding="utf-8")
+
+    def setting(pattern: str, description: str) -> str:
+        match = re.search(pattern, contents, flags=re.MULTILINE)
+        if not match:
+            fail(f"cannot determine {description} for {environment}")
+        return match.group(1)
+
+    volume = setting(r"^Volume=([^:\s#]+):/data(?::[^\s#]+)?\s*$", "/data volume")
+    world = setting(r"^Environment=LEVEL=([^\s#]+)\s*$", "world directory")
+    image = setting(r"^ContainerName=([^\s#]+)\s*$", "container image name")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", world):
+        fail(f"unsafe world directory in {files[0]}")
+    # Each environment's local image is conventionally named after its
+    # ContainerName.  This image already contains Python and is never started.
+    return volume, world, f"localhost/{image}:latest"
+
+
+def load_players() -> list[dict[str, object]]:
+    validator = REPO_ROOT / "scripts" / "whitelist-json.py"
+    check = subprocess.run([sys.executable, str(validator), "validate", str(IDENTITIES)])
+    if check.returncode:
+        fail("identities.json failed validation; refusing to audit an ambiguous source")
+    try:
+        payload = json.loads(IDENTITIES.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot read {IDENTITIES}: {error}")
+    if payload.get("schema_version") != 1 or not isinstance(payload.get("players"), list):
+        fail("identities.json must contain schema_version 1 and a players array")
+    players = payload["players"]
+    for player in players:
+        if not isinstance(player, dict) or not isinstance(player.get("name"), str):
+            fail("identities.json contains an invalid player")
+        for field in ("offline_uuid", "premium_uuid", "observed_easyauth_uuid"):
+            value = player.get(field)
+            if value is not None and not isinstance(value, str):
+                fail(f"{field} for {player['name']} is invalid")
+    return players
+
+
+COLLECTOR = r'''
+import json
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+identities = json.load(open(sys.argv[1], encoding="utf-8"))
+world = Path("/data") / sys.argv[2] / "players"
+db_path = Path("/data/EasyAuth/easyauth.db")
+rows = {}
+unmanaged_count = 0
+if db_path.is_file():
+    try:
+        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        for username, stored_uuid in db.execute("SELECT username, uuid FROM easyauth"):
+            rows[username.casefold()] = {"username": username, "uuid": stored_uuid}
+        db.close()
+    except sqlite3.Error as error:
+        print(json.dumps({"database_error": str(error)}))
+        raise SystemExit(0)
+
+players = []
+expected_names = set()
+for player in identities["players"]:
+    name = player["name"]
+    expected_names.add(name.casefold())
+    offline = player["offline_uuid"]
+    premium = player.get("premium_uuid")
+    files = {}
+    for label, relative in (
+        ("data", f"data/{offline}.dat"),
+        ("data_old", f"data/{offline}.dat_old"),
+        ("stats", f"stats/{offline}.json"),
+        ("advancements", f"advancements/{offline}.json"),
+    ):
+        files[label] = (world / relative).is_file()
+    legacy = {}
+    if premium:
+        for label, relative in (
+            ("data", f"data/{premium}.dat"),
+            ("data_old", f"data/{premium}.dat_old"),
+            ("stats", f"stats/{premium}.json"),
+            ("advancements", f"advancements/{premium}.json"),
+        ):
+            legacy[label] = (world / relative).is_file()
+    players.append({"name": name, "database": rows.get(name.casefold()),
+                    "files": files, "legacy_premium_files": legacy})
+
+print(json.dumps({
+    "database_present": db_path.is_file(),
+    "unmanaged_database_records": len(set(rows) - expected_names),
+    "players": players,
+}))
+'''
+
+
+def collect(volume: str, world: str, image: str, players: list[dict[str, object]]) -> dict[str, object]:
+    input_file = IDENTITIES
+    command = [
+        PODMAN,
+        "run",
+        "--rm",
+        "--user",
+        "0",
+        "--entrypoint",
+        "python3",
+        "-v",
+        f"{volume}:/data:ro",
+        "-v",
+        f"{input_file}:/input/identities.json:ro",
+        image,
+        "-c",
+        COLLECTOR,
+        "/input/identities.json",
+        world,
+    ]
+    result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit status {result.returncode}"
+        fail(f"could not read {volume} through Podman: {detail}")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        fail(f"audit collector returned invalid data: {error}")
+
+
+def audit(environment: str) -> None:
+    volume, world, image = load_environment(environment)
+    players = load_players()
+    report = collect(volume, world, image, players)
+    if "database_error" in report:
+        fail(f"cannot read EasyAuth database: {report['database_error']}")
+
+    report_players = {item["name"].casefold(): item for item in report.get("players", [])}
+    errors = 0
+    warnings = 0
+    print(f"Identity audit for {environment} (volume {volume}, world {world})")
+    if report.get("database_present"):
+        print(f"EasyAuth database present; ignored unmanaged records: {report.get('unmanaged_database_records', 0)}")
+    else:
+        print("EasyAuth database is not present; checking player files only.")
+
+    for player in players:
+        name = str(player["name"])
+        offline = str(player["offline_uuid"])
+        item = report_players.get(name.casefold())
+        if not item:
+            errors += 1
+            print(f"ERROR {name}: collector returned no player record")
+            continue
+        database = item.get("database")
+        print(f"\n{name}: canonical offline UUID {offline}")
+        if report.get("database_present"):
+            if database is None:
+                print("  EasyAuth: not registered yet")
+            elif database.get("uuid") == offline:
+                print("  EasyAuth: canonical offline UUID matches")
+            else:
+                errors += 1
+                print(f"  ERROR EasyAuth UUID is {database.get('uuid')!r}, expected {offline}")
+
+        files = item.get("files", {})
+        present = sum(bool(files.get(key)) for key in ("data", "data_old", "stats", "advancements"))
+        if present == 4:
+            print("  canonical player files: complete (4/4)")
+        elif present == 0:
+            print("  canonical player files: none yet")
+        else:
+            warnings += 1
+            missing = ", ".join(key for key in ("data", "data_old", "stats", "advancements") if not files.get(key))
+            print(f"  WARNING canonical player files incomplete ({present}/4; missing {missing})")
+
+        legacy = item.get("legacy_premium_files", {})
+        legacy_count = sum(bool(value) for value in legacy.values())
+        if legacy_count:
+            print(f"  historical premium files: retained ({legacy_count}/4; no action taken)")
+
+    if errors:
+        print(f"\nResult: FAILED ({errors} error(s), {warnings} warning(s)); no data was changed.")
+        raise SystemExit(1)
+    print(f"\nResult: OK ({warnings} warning(s)); no data was changed.")
+
+
+def main() -> None:
+    if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help", "help"}:
+        usage()
+        return
+    if len(sys.argv) != 3 or sys.argv[1] != "audit":
+        usage()
+        raise SystemExit(2)
+    audit(sys.argv[2])
+
+
+if __name__ == "__main__":
+    main()

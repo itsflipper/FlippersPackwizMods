@@ -6,19 +6,21 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 usage() {
     cat <<'EOF'
 Usage:
-  gsr help [environment|whitelist|backup]
+  gsr help [environment|whitelist|backup|identity]
   gsr environment list
   gsr environment start <environment>
   gsr environment stop <environment>
   gsr environment restart <environment>
   gsr environment status <environment>
   gsr whitelist <command> [arguments...]
+  gsr identity audit <environment>
   gsr backup <command> [arguments...]
 
 Examples:
   gsr environment list
   gsr environment start vanilla
   gsr whitelist add premium PlayerName
+  gsr identity audit vanilla
   gsr backup verify vanilla
 
 The legacy commands switchenv, mc-whitelist and gsr-backup remain available.
@@ -31,6 +33,7 @@ case "${1:-help}" in
             '') usage ;;
             environment|env) exec "$SCRIPT_DIR/switchenv" --help ;;
             whitelist) exec "$SCRIPT_DIR/mc-whitelist" --help ;;
+            identity) exec "$SCRIPT_DIR/gsr-identity" --help ;;
             backup) exec "$SCRIPT_DIR/gsr-backup" --help ;;
             *) usage >&2; exit 2 ;;
         esac
@@ -42,6 +45,10 @@ case "${1:-help}" in
     whitelist)
         shift
         exec "$SCRIPT_DIR/mc-whitelist" "$@"
+        ;;
+    identity)
+        shift
+        exec "$SCRIPT_DIR/gsr-identity" "$@"
         ;;
     backup)
         shift

@@ -35,6 +35,7 @@ gsr environment start vanilla
 gsr environment stop vanilla
 gsr environment status vanilla
 gsr whitelist list
+gsr identity audit vanilla
 gsr backup list
 ```
 
@@ -109,6 +110,28 @@ RCON, or `whitelist.json` are not authoritative and can be replaced by the next
 
 “Private” means server-local and outside the repository. The generated
 whitelist contains no passwords or EasyAuth database data.
+
+### Identity consistency audit
+
+The environments currently use `online-mode=false`. Therefore the deterministic
+offline UUID for the exact player name is the canonical UUID for live player
+data, even for a player with a premium account. The premium UUID remains an
+allowed whitelist identity and useful account metadata, but it is not a second
+live player-data identity.
+
+Run the read-only audit after a migration, before an identity repair, or during
+routine maintenance:
+
+```bash
+gsr identity audit vanilla
+```
+
+It compares `identities.json`, the EasyAuth UUID column, and the four canonical
+player-data files in the selected environment. It reports retained historical
+premium files separately and never modifies EasyAuth, a whitelist, player data,
+the volume, or the running server. A player who has not joined yet is reported
+as such rather than treated as an error. A different EasyAuth UUID is an error
+that must be investigated before any manual migration.
 
 ## Environment backups
 
