@@ -2,45 +2,49 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+REPO_ROOT="${GSR_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+export GSR_REPO_ROOT="$REPO_ROOT"
 
 usage() {
     cat <<'EOF'
 Usage:
-  gsr help [environment|whitelist|backup|identity]
-  gsr environment list
-  gsr environment start <environment>
-  gsr environment stop <environment>
-  gsr environment restart <environment>
-  gsr environment status <environment>
+  gsr status [environment]
+  gsr start <environment>
+  gsr stop
+  gsr restart
+  gsr switch <environment>
+  gsr rcon
+  gsr properties edit
   gsr whitelist <command> [arguments...]
   gsr identity audit <environment>
   gsr backup <command> [arguments...]
 
 Examples:
-  gsr environment list
-  gsr environment start vanilla
-  gsr whitelist add premium PlayerName
+  gsr status
+  gsr start vanilla
+  gsr switch skyblock
+  gsr rcon
+  gsr properties edit
+  gsr whitelist audit
   gsr identity audit vanilla
   gsr backup verify vanilla
-
-The legacy commands switchenv, mc-whitelist and gsr-backup remain available.
 EOF
+}
+
+environment_command() {
+    exec "$REPO_ROOT/scripts/switch-environment.sh" "$@"
 }
 
 case "${1:-help}" in
     help|-h|--help)
-        case "${2:-}" in
-            '') usage ;;
-            environment|env) exec "$SCRIPT_DIR/switchenv" --help ;;
-            whitelist) exec "$SCRIPT_DIR/mc-whitelist" --help ;;
-            identity) exec "$SCRIPT_DIR/gsr-identity" --help ;;
-            backup) exec "$SCRIPT_DIR/gsr-backup" --help ;;
-            *) usage >&2; exit 2 ;;
-        esac
+        usage
         ;;
-    environment|env)
+    status|list|ls|start|stop|restart|switch|rcon)
+        environment_command "$@"
+        ;;
+    properties)
         shift
-        exec "$SCRIPT_DIR/switchenv" "$@"
+        exec "$SCRIPT_DIR/gsr-properties" "$@"
         ;;
     whitelist)
         shift
@@ -53,6 +57,12 @@ case "${1:-help}" in
     backup)
         shift
         exec "$SCRIPT_DIR/gsr-backup" "$@"
+        ;;
+    # Compatibility only for explicit old documentation while the new command
+    # is rolled out. These forms are not installed as separate PATH commands.
+    environment|env)
+        shift
+        environment_command "$@"
         ;;
     *)
         echo "Unknown gsr command: $1" >&2

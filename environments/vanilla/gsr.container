@@ -14,6 +14,7 @@ Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPac
 
 Environment=ONLINE_MODE=FALSE
 Environment=ENFORCE_SECURE_PROFILE=FALSE
+Environment=OVERRIDE_SERVER_PROPERTIES=FALSE
 Environment=ENABLE_WHITELIST=TRUE
 Environment=ENFORCE_WHITELIST=TRUE
 Environment=WHITELIST_FILE=/tmp/gsr-whitelist.json
@@ -28,8 +29,9 @@ Volume=%h/.config/gsr/shared/whitelist.json:/tmp/gsr-whitelist.json:ro
 [Service]
 Restart=always
 TimeoutStopSec=900
-ExecStop=-%h/.local/bin/gsr-backup prepare vanilla
-ExecStopPost=-%h/.local/bin/gsr-backup finalize vanilla
+ExecStartPre=-%h/.local/bin/gsr whitelist sync-start vanilla
+ExecStop=-%h/.local/bin/gsr backup prepare vanilla
+ExecStopPost=-%h/.local/bin/gsr backup finalize vanilla
 
 [Install]
 WantedBy=default.target

@@ -158,7 +158,7 @@ fresh_install() {
     sync_systemd "$repo_path"
 
     read -rp "Start the default Vanilla server now? [y/N] " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
+    if [[ "$ans" == y ]]; then
         systemctl --user start "$ANCHOR_SERVICE"
         echo "==> Started. Following logs (Ctrl+C to exit):"
         journalctl --user -u "$ANCHOR_SERVICE" -f
@@ -212,7 +212,7 @@ ensure_user_bin_path() {
 }
 
 sync_user_commands() {
-    local repo_path command_dir command_path command_name link_path
+    local repo_path command_dir command_path command_name link_path legacy_path
 
     repo_path="$(cd "$1" && pwd)"
     command_dir="$repo_path/$COMMANDS_DIR"
@@ -220,19 +220,29 @@ sync_user_commands() {
 
     ensure_user_bin_path
 
-    for command_path in "$command_dir"/*; do
-        [[ -f "$command_path" && -x "$command_path" ]] || continue
+    command_name="gsr"
+    command_path="$command_dir/$command_name"
+    link_path="$USER_BIN_DIR/$command_name"
+    [[ -f "$command_path" && -x "$command_path" ]] || {
+        echo "Missing executable command: $command_path" >&2
+        return 1
+    }
+    if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+        echo "Refusing to replace non-symlink command: $link_path" >&2
+        return 1
+    fi
+    ln -sfn "$command_path" "$link_path"
+    echo "    command: gsr"
 
-        command_name="$(basename "$command_path")"
-        link_path="$USER_BIN_DIR/$command_name"
-
-        if [[ -e "$link_path" && ! -L "$link_path" ]]; then
-            echo "Refusing to replace non-symlink command: $link_path" >&2
-            return 1
+    # Old public aliases made it too easy to bypass the central GSR command.
+    # Remove only links that demonstrably belong to this checkout; user-owned
+    # files with the same names are never touched.
+    for command_name in switchenv mc-whitelist gsr-backup gsr-identity gsr-properties; do
+        legacy_path="$USER_BIN_DIR/$command_name"
+        if [[ -L "$legacy_path" && "$(readlink -f "$legacy_path" 2>/dev/null || true)" == "$command_dir/$command_name" ]]; then
+            rm -f "$legacy_path"
+            echo "    removed legacy alias: $command_name"
         fi
-
-        ln -sfn "$command_path" "$link_path"
-        echo "    command: $command_name"
     done
 }
 
@@ -265,7 +275,7 @@ case "$mode" in
         ;;
     r|R)
         read -rp "This wipes $repo_path and reclones. Sure? [y/N] " confirm
-        [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted" >&2; exit 1; }
+        [[ "$confirm" == y ]] || { echo "Aborted" >&2; exit 1; }
         if inside_repo "$repo_path"; then
             echo "You're inside $repo_path — cd out before nuking." >&2
             exit 1
@@ -282,7 +292,7 @@ case "$mode" in
         ;;
 d|D)
     read -rp "Uninstall: stop environments, remove $repo_path and environment links. Sure? [y/N] " confirm
-    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted" >&2; exit 1; }
+    [[ "$confirm" == y ]] || { echo "Aborted" >&2; exit 1; }
     if inside_repo "$repo_path"; then
         echo "You're inside $repo_path — cd out before deleting." >&2
         exit 1

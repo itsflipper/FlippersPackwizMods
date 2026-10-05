@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+REPO_ROOT="${GSR_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+ENVIRONMENTS_ROOT="$REPO_ROOT/environments"
+WORK_DIR=""
+
+cleanup() {
+    [[ -z "$WORK_DIR" ]] || rm -rf -- "$WORK_DIR"
+}
+trap cleanup EXIT
+
+usage() {
+    cat <<'EOF'
+Usage:
+  gsr properties edit
+
+Edits the live server.properties of the active environment. If no environment
+is active, select an initialized volume from the displayed list.
+EOF
+}
+
+confirm_yes() {
+    local answer
+    read -r -p "$1 [y/N] " answer
+    [[ "$answer" == y ]]
+}
+
+container_file_for() {
+    local environment="$1"
+    local files=("$ENVIRONMENTS_ROOT/$environment"/*.container)
+    [[ ${#files[@]} -eq 1 && -f "${files[0]}" ]] || return 1
+    printf '%s\n' "${files[0]}"
+}
+
+load_environment() {
+    local environment="$1" file
+    file="$(container_file_for "$environment")" || {
+        echo "gsr-properties: unknown or invalid environment: $environment" >&2
+        return 1
+    }
+    TARGET_ENVIRONMENT="$environment"
+    TARGET_SERVICE="$(basename "$file" .container)"
+    TARGET_CONTAINER="$(sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$file" | head -n1)"
+    TARGET_VOLUME="$(sed -nE 's#^Volume=([^:[:space:]]+):/data(:[^[:space:]]*)?$#\1#p' "$file" | head -n1)"
+    [[ -n "$TARGET_CONTAINER" && -n "$TARGET_VOLUME" ]] || {
+        echo "gsr-properties: cannot determine container or /data volume for $environment" >&2
+        return 1
+    }
+}
+
+service_exists() {
+    systemctl --user cat "$1.service" >/dev/null 2>&1
+}
+
+is_active() {
+    systemctl --user is-active --quiet "$1.service"
+}
+
+mapfile -t ENVIRONMENTS < <(find "$ENVIRONMENTS_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+(( ${#ENVIRONMENTS[@]} > 0 )) || { echo "gsr-properties: no environments found." >&2; exit 1; }
+
+active_environments() {
+    local environment service
+    for environment in "${ENVIRONMENTS[@]}"; do
+        service="$(basename "$(container_file_for "$environment")" .container)" || continue
+        service_exists "$service" && is_active "$service" && printf '%s\n' "$environment"
+    done
+}
+
+volume_has_properties() {
+    local volume="$1"
+    podman volume exists "$volume" || return 1
+    podman volume export "$volume" 2>/dev/null | tar -tf - 2>/dev/null | awk '
+        { path=$0; sub(/^\.\//, "", path) }
+        path == "server.properties" { found=1; exit }
+        END { exit !found }
+    '
+}
+
+choose_stopped_environment() {
+    local index=1 environment state selection
+    local -a selectable=()
+
+    echo "No GSR environment is active. Which properties should be edited?"
+    for environment in "${ENVIRONMENTS[@]}"; do
+        load_environment "$environment"
+        if volume_has_properties "$TARGET_VOLUME"; then
+            state="Volume vorhanden, gestoppt"
+            selectable+=("$environment")
+        elif podman volume exists "$TARGET_VOLUME"; then
+            state="Volume vorhanden, noch nicht initialisiert"
+        else
+            state="noch nicht initialisiert"
+        fi
+        printf '[%d] %-10s — %s\n' "$index" "$environment" "$state"
+        ((index++))
+    done
+
+    read -r -p "Auswahl (Enter = Abbruch): " selection
+    [[ -n "$selection" ]] || { echo "gsr-properties: cancelled."; exit 0; }
+    [[ "$selection" =~ ^[0-9]+$ ]] && ((selection >= 1 && selection < index)) || {
+        echo "gsr-properties: invalid selection." >&2
+        exit 2
+    }
+    load_environment "${ENVIRONMENTS[selection-1]}"
+    volume_has_properties "$TARGET_VOLUME" || {
+        echo "gsr-properties: $TARGET_ENVIRONMENT has no live server.properties yet; start it once to initialize its volume." >&2
+        exit 1
+    }
+}
+
+validate_properties() {
+    local file="$1"
+    awk '
+        /^[[:space:]]*($|#)/ { next }
+        index($0, "=") == 0 { print "invalid line " NR ": " $0 > "/dev/stderr"; bad=1; next }
+        {
+            key=substr($0, 1, index($0, "=")-1)
+            if (key == "") { print "empty property key on line " NR > "/dev/stderr"; bad=1; next }
+            if (seen[key]++) { print "duplicate property: " key > "/dev/stderr"; bad=1 }
+        }
+        END { exit bad }
+    ' "$file"
+}
+
+critical_change() {
+    diff -u "$1" "$2" 2>/dev/null | awk '
+        /^\+[^+]/ {
+            line=substr($0, 2)
+            key=substr(line, 1, index(line, "=")-1)
+            if (key ~ /^(online-mode|level-name|level-seed|hardcore|server-port|enable-rcon|rcon\.port|rcon\.password)$/) found=1
+        }
+        END { exit !found }
+    '
+}
+
+extract_properties() {
+    local entry
+    entry="$(podman volume export "$TARGET_VOLUME" | tar -tf - | awk '
+        { path=$0; sub(/^\.\//, "", path) }
+        path == "server.properties" { print $0; exit }
+    ')"
+    [[ -n "$entry" ]] || { echo "gsr-properties: server.properties disappeared from $TARGET_VOLUME." >&2; return 1; }
+    podman volume export "$TARGET_VOLUME" | tar -xOf - "$entry" > "$WORK_DIR/original"
+    cp "$WORK_DIR/original" "$WORK_DIR/edited"
+}
+
+write_properties() {
+    podman run --rm --user 0 \
+        -v "$TARGET_VOLUME:/data" \
+        -v "$WORK_DIR:/edit:ro" \
+        --entrypoint sh "localhost/$TARGET_CONTAINER:latest" \
+        -c 'set -eu; cat /edit/edited > /data/.server.properties.gsr-new; chmod 640 /data/.server.properties.gsr-new; mv -f /data/.server.properties.gsr-new /data/server.properties'
+}
+
+[[ "${1:-}" == edit && $# -eq 1 ]] || { usage >&2; exit 2; }
+command -v nano >/dev/null || { echo "gsr-properties: nano is required." >&2; exit 1; }
+
+mapfile -t ACTIVE < <(active_environments)
+if ((${#ACTIVE[@]} == 1)); then
+    load_environment "${ACTIVE[0]}"
+    if ! confirm_yes "$TARGET_ENVIRONMENT is active. Stop it cleanly and create a backup before editing?"; then
+        echo "gsr-properties: cancelled."
+        exit 0
+    fi
+    systemctl --user stop "$TARGET_SERVICE.service"
+    "$SCRIPT_DIR/gsr-backup" verify "$TARGET_ENVIRONMENT"
+elif ((${#ACTIVE[@]} == 0)); then
+    choose_stopped_environment
+    "$SCRIPT_DIR/gsr-backup" create "$TARGET_ENVIRONMENT"
+    "$SCRIPT_DIR/gsr-backup" verify "$TARGET_ENVIRONMENT"
+else
+    echo "gsr-properties: more than one environment is active; refusing to choose a volume." >&2
+    exit 1
+fi
+
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gsr-properties.XXXXXX")"
+extract_properties
+nano "$WORK_DIR/edited"
+validate_properties "$WORK_DIR/edited"
+
+if cmp -s "$WORK_DIR/original" "$WORK_DIR/edited"; then
+    echo "gsr-properties: no changes made."
+    exit 0
+fi
+
+diff -u "$WORK_DIR/original" "$WORK_DIR/edited" || true
+if critical_change "$WORK_DIR/original" "$WORK_DIR/edited"; then
+    echo "This changes an auth, world-generation, port, or RCON property."
+fi
+if ! confirm_yes "Apply these changes to $TARGET_ENVIRONMENT ($TARGET_VOLUME)?"; then
+    echo "gsr-properties: changes discarded."
+    exit 0
+fi
+
+write_properties
+echo "gsr-properties: updated live server.properties for $TARGET_ENVIRONMENT."
+if confirm_yes "Start $TARGET_ENVIRONMENT now?"; then
+    systemctl --user start "$TARGET_SERVICE.service"
+    systemctl --user --no-pager --full status "$TARGET_SERVICE.service"
+fi

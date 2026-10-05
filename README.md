@@ -9,10 +9,9 @@
   - Podman Quadlets using [itzg/minecraft-server](https://hub.docker.com/r/itzg/minecraft-server) as base image
   - Fetches the matching modpack automatically
   - Bootstrap script for both fresh installs and infrastructure updates
-- `scripts/switch-environment.sh` switches safely between environments
-- `gsr` is the short, grouped server command interface
-- `mc-whitelist` maintains one private whitelist for every environment
-- `gsr-backup` keeps one verified full-volume backup per environment
+- `gsr` is the single installed server command interface
+- `gsr whitelist` maintains one private whitelist for every environment
+- `gsr backup` keeps one verified full-volume backup per environment
 - Worlds, player data and runtime configuration remain separate per environment
 
 ## Environments
@@ -30,18 +29,37 @@ After bootstrap, the grouped command is the normal entry point:
 
 ```bash
 gsr help
-gsr environment list
-gsr environment start vanilla
-gsr environment stop vanilla
-gsr environment status vanilla
+gsr status
+gsr start vanilla
+gsr switch skyblock
+gsr stop
+gsr restart
+gsr rcon
+gsr properties edit
 gsr whitelist list
 gsr identity audit vanilla
 gsr backup list
 ```
 
-The existing `switchenv`, `mc-whitelist`, and `gsr-backup` commands remain as
-compatible direct forms. New server management commands should be added below
-the matching `gsr environment`, `gsr whitelist`, or `gsr backup` group.
+`gsr start <environment>` refuses to stop another environment implicitly;
+use `gsr switch <environment>` for the explicit, backed-up change. `gsr stop`
+and `gsr restart` always act on exactly the active environment. Bootstrap only
+installs `gsr` into the user's PATH; the older helper names remain internal.
+
+### Persistent server properties
+
+Each environment's image creates `server.properties` from its container values
+only for a new, empty `/data` volume. Afterwards the live file in that volume
+is authoritative, so a Git update or restart does not reset settings such as
+`difficulty`, MOTD or view distance.
+
+Use `gsr rcon` for normal Minecraft console commands. Gamerules persist in the
+world; commands such as `difficulty hard` affect the running server but must
+also be written as `difficulty=hard` in `server.properties` to survive a
+restart. `gsr properties edit` safely stops the selected environment, verifies
+a backup, opens its live file in `nano`, validates it, shows the diff, and can
+start the environment again. All `[y/N]` prompts accept only lowercase `y`;
+Enter means No.
 
 ## Shared private whitelist
 
@@ -148,8 +166,8 @@ exported, compressed with zstd, verified, and made current. The previous local
 backup is only removed after the new archive has passed its integrity checks.
 
 The normal server start always uses its live volume; a backup is never mounted
-automatically. Direct `podman stop` commands bypass this protection. Use
-`systemctl`, `switchenv`, or the bootstrap script for planned maintenance.
+automatically. Direct `podman stop` commands bypass this protection. Use `gsr`
+or systemd for planned maintenance.
 
 ```bash
 gsr backup list
@@ -299,9 +317,9 @@ systemctl --user daemon-reload
 
 ### Start / Stop / Restart
 ```
-systemctl --user start gsr
-systemctl --user stop gsr
-systemctl --user restart gsr
+gsr start vanilla
+gsr stop
+gsr restart
 ```
 
 ### Logs

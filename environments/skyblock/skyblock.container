@@ -15,6 +15,8 @@ Environment=PACKWIZ_URL=https://raw.githubusercontent.com/itsflipper/FlippersPac
 
 Environment=DATAPACKS=https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_worldgen_v2_0_12-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_island_standard_v1_1_7-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_sand_island_v2_0_5-MC_26_2.zip,https://github.com/BPR02/SkyBlock_Collection/releases/download/v3.3.0/skyvoid_advancements_v1_0_13-MC_26_2.zip
 
+Environment=ONLINE_MODE=TRUE
+Environment=OVERRIDE_SERVER_PROPERTIES=FALSE
 Environment=ENABLE_WHITELIST=TRUE
 Environment=ENFORCE_WHITELIST=TRUE
 Environment=WHITELIST_FILE=/tmp/gsr-whitelist.json
@@ -29,8 +31,9 @@ Volume=%h/.config/gsr/shared/whitelist.json:/tmp/gsr-whitelist.json:ro
 [Service]
 Restart=always
 TimeoutStopSec=900
-ExecStop=-%h/.local/bin/gsr-backup prepare skyblock
-ExecStopPost=-%h/.local/bin/gsr-backup finalize skyblock
+ExecStartPre=-%h/.local/bin/gsr whitelist sync-start skyblock
+ExecStop=-%h/.local/bin/gsr backup prepare skyblock
+ExecStopPost=-%h/.local/bin/gsr backup finalize skyblock
 
 [Install]
 WantedBy=default.target

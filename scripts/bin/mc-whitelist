@@ -43,7 +43,7 @@ build_master() {
 active_container() {
   local script_path repo_root container_file container_name running=()
   script_path="$(readlink -f "$0")"
-  repo_root="$(cd "$(dirname "$script_path")/../.." && pwd)"
+  repo_root="${GSR_REPO_ROOT:-$(cd "$(dirname "$script_path")/../.." && pwd)}"
 
   while IFS= read -r -d '' container_file; do
     container_name="$(sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$container_file" | head -n1)"
@@ -58,6 +58,31 @@ active_container() {
     exit 1
   fi
   ((${#running[@]} == 1)) && printf '%s\n' "${running[0]}"
+}
+
+sync_start() {
+  local environment="$1" repo_root container_file volume container image
+  repo_root="${GSR_REPO_ROOT:-$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)}"
+  container_file="$repo_root/environments/$environment/$(find "$repo_root/environments/$environment" -maxdepth 1 -name '*.container' -printf '%f\n' | head -n1)"
+  [[ -f "$container_file" ]] || {
+    echo "Unknown or invalid environment: $environment" >&2
+    exit 1
+  }
+  volume="$(sed -nE 's#^Volume=([^:[:space:]]+):/data(:[^[:space:]]*)?$#\1#p' "$container_file" | head -n1)"
+  container="$(sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$container_file" | head -n1)"
+  [[ -n "$volume" && -n "$container" ]] || {
+    echo "Cannot determine volume or container for $environment." >&2
+    exit 1
+  }
+  require_master
+  podman volume exists "$volume" || podman volume create "$volume" >/dev/null
+  image="localhost/$container:latest"
+  podman run --rm --user 0 \
+    -v "$volume:/data" \
+    -v "$MASTER_FILE:/input/whitelist.json:ro" \
+    --entrypoint sh "$image" \
+    -c 'set -eu; cp /input/whitelist.json /data/.whitelist.gsr-new; chmod 644 /data/.whitelist.gsr-new; mv -f /data/.whitelist.gsr-new /data/whitelist.json'
+  echo "Master whitelist applied to $environment before start."
 }
 
 apply_master() {
@@ -117,6 +142,10 @@ case "${1:-}" in
     [[ $# -eq 1 ]] || { usage >&2; exit 2; }
     require_master
     python3 "$JSON_TOOL" audit "$IDENTITIES_FILE" "$MASTER_FILE"
+    ;;
+  sync-start)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    sync_start "$2"
     ;;
   -h|--help|help|'')
     usage
