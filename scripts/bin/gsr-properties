@@ -152,7 +152,13 @@ write_properties() {
         -v "$TARGET_VOLUME:/data" \
         -v "$WORK_DIR:/edit:ro" \
         --entrypoint sh "localhost/$TARGET_CONTAINER:latest" \
-        -c 'set -eu; cat /edit/edited > /data/.server.properties.gsr-new; chmod 640 /data/.server.properties.gsr-new; mv -f /data/.server.properties.gsr-new /data/server.properties'
+        -c 'set -eu
+            owner="$(stat -c %u:%g /data/server.properties)"
+            mode="$(stat -c %a /data/server.properties)"
+            cat /edit/edited > /data/.server.properties.gsr-new
+            chown "$owner" /data/.server.properties.gsr-new
+            chmod "$mode" /data/.server.properties.gsr-new
+            mv -f /data/.server.properties.gsr-new /data/server.properties'
 }
 
 [[ "${1:-}" == edit && $# -eq 1 ]] || { usage >&2; exit 2; }
