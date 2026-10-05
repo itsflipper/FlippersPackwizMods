@@ -11,6 +11,11 @@ hash = "650dac1687fb0ba238dfd690fda72e41e3cdd3a9507cb2cd49980839307ae675"
 metafile = true
 
 [[files]]
+file = "mods/afk-cinematics.pw.toml"
+hash = "7fa251f7f30c6c7aee45ced86dca4c8f1b04e3ea612f38d9e42194747179b20b"
+metafile = true
+
+[[files]]
 file = "mods/appleskin.pw.toml"
 hash = "ff675667f4c6924a9eaebc42dc2df5306dc5e8b005e931d9d8b73cebad67d5eb"
 metafile = true
@@ -18,6 +23,16 @@ metafile = true
 [[files]]
 file = "mods/badoptimizations.pw.toml"
 hash = "fab0f8da4e12ee8f400a8f8a95619dc3aa6881ea0821a25f5cc6f2c77ecacf45"
+metafile = true
+
+[[files]]
+file = "mods/better-block-entities.pw.toml"
+hash = "97ffadc9852dc08c2d2b3c26d9bd8befb42e4e92a02ad8c171f7b960c7eb9b4f"
+metafile = true
+
+[[files]]
+file = "mods/bundles-beyond.pw.toml"
+hash = "e5b55944711721c8309bef87f2e0ac8ebcb6cb57864808c8ccad5529625a7935"
 metafile = true
 
 [[files]]
@@ -106,11 +121,6 @@ hash = "069d81cab53c0141459ad4d70bcf3e10f17652f24cc62d3b4a0fc2cd2b700871"
 metafile = true
 
 [[files]]
-file = "mods/first-person-model.pw.toml"
-hash = "ad510531885c9c685ddf76ad3f4a329647eb31077e3a0374008cd5224874e189"
-metafile = true
-
-[[files]]
 file = "mods/forge-config-api-port.pw.toml"
 hash = "3eb12471fce0aadbda432f7fd5ba4e2120e0e0ebbb3663eea756a17ec0254407"
 metafile = true
@@ -118,6 +128,11 @@ metafile = true
 [[files]]
 file = "mods/freecam.pw.toml"
 hash = "c06f7a10340c07828d47e0a3b78e0b839723da4e9e6030e99ea166222007db32"
+metafile = true
+
+[[files]]
+file = "mods/fwa.pw.toml"
+hash = "1681ac0c55fd320610ad417d62f3191b44bca455f906b9914852c15a5b2d0e57"
 metafile = true
 
 [[files]]
@@ -151,6 +166,11 @@ hash = "7af31ba6f410c0f3d33b60b35de3c2a3a1e8ccba2f479bb36e72232e3984618b"
 metafile = true
 
 [[files]]
+file = "mods/litematica.pw.toml"
+hash = "5f52a5a69d6ea21c65a9df879fb9b334ed2aaf3ddb50bf13c9e2a57cc079a50d"
+metafile = true
+
+[[files]]
 file = "mods/lithium.pw.toml"
 hash = "a39389e4c813b70b984a0c8aed769825b32c321ee0b9aed1151d92cb38f77357"
 metafile = true
@@ -158,6 +178,11 @@ metafile = true
 [[files]]
 file = "mods/locator-heads.pw.toml"
 hash = "a8c2641bfbe4758d8d33f21b926f5cec48cb555becaded7cd6f0de2fc2bf0f91"
+metafile = true
+
+[[files]]
+file = "mods/malilib.pw.toml"
+hash = "aa19aaf146fb03f895583147e1906b950c9acc2c31a16110d3764401a65a79e1"
 metafile = true
 
 [[files]]
@@ -173,6 +198,11 @@ metafile = true
 [[files]]
 file = "mods/mouse-tweaks.pw.toml"
 hash = "d9f809b321cdd117600e45f92215c8e750ed0b65641c18d394bb4c111019581d"
+metafile = true
+
+[[files]]
+file = "mods/myskins.pw.toml"
+hash = "d0518335f91eb76b10a515ec0c4ac911dc06f0dfc982bb108771c3c39203e986"
 metafile = true
 
 [[files]]
@@ -193,6 +223,11 @@ metafile = true
 [[files]]
 file = "mods/placeholder-api.pw.toml"
 hash = "4d3d2ad41a037af6f78e2a6c2908c4098bb0b5c03ad0d2711a0c0c6df5e7a172"
+metafile = true
+
+[[files]]
+file = "mods/punchy-fpa.pw.toml"
+hash = "0cdba3e3095df350b97f5edda54deaf67ae31aa6ac039ec44f27e319f66d4c3a"
 metafile = true
 
 [[files]]
@@ -218,6 +253,11 @@ metafile = true
 [[files]]
 file = "mods/servercore.pw.toml"
 hash = "07e3c8dc0d6b3717b01c91597e6d1a597333a1883731891df3c535164f96f5da"
+metafile = true
+
+[[files]]
+file = "mods/shulker-echest-tooltip.pw.toml"
+hash = "d408535e60b1349460ace34a5dae1397151ce6e1de5209bd4d2a9a5d7aa0d120"
 metafile = true
 
 [[files]]

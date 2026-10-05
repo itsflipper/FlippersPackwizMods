@@ -1,0 +1,13 @@
+name = "Shulker / Ender Chest tooltip"
+filename = "peek-1.0.2.jar"
+side = "client"
+
+[download]
+url = "https://cdn.modrinth.com/data/xMbNBtgO/versions/edSz7St2/peek-1.0.2.jar"
+hash-format = "sha512"
+hash = "cf1948c92b62927c9cf15609d9696183adae0caf039115a58967a602aafcadeb955214cd76b937135d61a65b4d9b59ae07e8349b3cd0e3ae617a22cf02a211e3"
+
+[update]
+[update.modrinth]
+mod-id = "xMbNBtgO"
+version = "edSz7St2"

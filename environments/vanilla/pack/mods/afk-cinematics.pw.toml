@@ -1,0 +1,13 @@
+name = "AFK Cinematics"
+filename = "afk-cinematics-1.0.6+26.3.jar"
+side = "client"
+
+[download]
+url = "https://cdn.modrinth.com/data/MjVuY1gY/versions/q7nT1JY4/afk-cinematics-1.0.6%2B26.3.jar"
+hash-format = "sha512"
+hash = "1efcb7eef529d6c1f4ff7a98a6d04e97a1ee2a1202d840b32aaf24a1edfbbc67ad0919c9e3367813b57a63e7d0878676485d8538be9c8578eacac1adfbf2d96e"
+
+[update]
+[update.modrinth]
+mod-id = "MjVuY1gY"
+version = "q7nT1JY4"

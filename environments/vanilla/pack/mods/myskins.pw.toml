@@ -1,0 +1,13 @@
+name = "MySkins"
+filename = "myskins-1.0.5.jar"
+side = "client"
+
+[download]
+url = "https://cdn.modrinth.com/data/tYxs4T5F/versions/K2Jo445e/myskins-1.0.5.jar"
+hash-format = "sha512"
+hash = "8a45ff65f8a0c3ee693898dae17e3caeb9868cf7da38a0c3c2eb7449f1edc26a8e5524a3aadcd38918cc5e910489ef8c884078c89b06ef9513d18375c20e448c"
+
+[update]
+[update.modrinth]
+mod-id = "tYxs4T5F"
+version = "K2Jo445e"
