@@ -1,0 +1,13 @@
+name = "Craft Config Lib"
+filename = "craft_config-1.1.13+26.3-fabric.jar"
+side = "client"
+
+[download]
+url = "https://cdn.modrinth.com/data/pqvUbuK1/versions/uZrFIHcm/craft_config-1.1.13%2B26.3-fabric.jar"
+hash-format = "sha512"
+hash = "322e941096efb4730e389462f0526d1352e240b68ddca11a6c0df5a15a7d9077eb31efb78460b672748f60d5e9dd6869ee2621c895c1fb2ccb0a6125ad9ab9a5"
+
+[update]
+[update.modrinth]
+mod-id = "pqvUbuK1"
+version = "uZrFIHcm"

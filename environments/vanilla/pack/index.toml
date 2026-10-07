@@ -31,6 +31,11 @@ hash = "97ffadc9852dc08c2d2b3c26d9bd8befb42e4e92a02ad8c171f7b960c7eb9b4f"
 metafile = true
 
 [[files]]
+file = "mods/better-tab-info.pw.toml"
+hash = "546409ddcc0cf52ce2bf92b2749aaafb6239c68d85ffc419bd42c2f1cf17c31c"
+metafile = true
+
+[[files]]
 file = "mods/bundles-beyond.pw.toml"
 hash = "e5b55944711721c8309bef87f2e0ac8ebcb6cb57864808c8ccad5529625a7935"
 metafile = true
@@ -63,6 +68,11 @@ metafile = true
 [[files]]
 file = "mods/context-tools.pw.toml"
 hash = "dd401bba0fa1305133bd908402561bfac5f25505fb21517f0a38ce0539232af9"
+metafile = true
+
+[[files]]
+file = "mods/craft-config-lib.pw.toml"
+hash = "1f81c578fa3edc089490b840428e83200b29464946273b6e6948fda425de07ff"
 metafile = true
 
 [[files]]
