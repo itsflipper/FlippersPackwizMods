@@ -219,6 +219,31 @@ if payload.get("environment") != sys.argv[2]:
 PY
 }
 
+snapshot_summary() {
+    local snapshot="$1"
+
+    python3 - "$snapshot/manifest.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+created = payload.get("created_at")
+size = payload.get("archive_bytes")
+if not isinstance(created, str) or not created:
+    raise SystemExit("backup manifest has no creation timestamp")
+if not isinstance(size, int) or size < 0:
+    raise SystemExit("backup manifest has no archive size")
+
+units = ("B", "KiB", "MiB", "GiB", "TiB")
+value = float(size)
+index = 0
+while value >= 1024 and index < len(units) - 1:
+    value /= 1024
+    index += 1
+print(f"{created}\t{value:.2f} {units[index]}")
+PY
+}
+
 remove_old_snapshots() {
     local current="$1" snapshot
 
@@ -301,12 +326,13 @@ finalize() {
 
 verify_current() {
     load_environment "$1"
-    local current
+    local current created size
 
     current="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
     [[ -n "$current" && -d "$current" ]] || fail "no current backup for $BACKUP_ENVIRONMENT"
     verify_snapshot "$current"
-    echo "gsr-backup: current backup for $BACKUP_ENVIRONMENT is valid."
+    read -r created size < <(snapshot_summary "$current")
+    echo "gsr-backup: current backup for $BACKUP_ENVIRONMENT is valid (created $created; $size)."
 }
 
 current_snapshot() {
@@ -550,7 +576,7 @@ remove_test_volume() {
 }
 
 show_list() {
-    local environment current
+    local environment current created size
 
     for environment in "$ENVIRONMENTS_ROOT"/*; do
         [[ -d "$environment" ]] || continue
@@ -558,8 +584,16 @@ show_list() {
         if ! load_environment "$environment" 2>/dev/null; then
             continue
         fi
-        current="$(readlink "$BACKUP_DIR/current" 2>/dev/null || true)"
-        printf '%-16s %s\n' "$environment" "${current:-no backup}"
+        current="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
+        if [[ -z "$current" || ! -d "$current" ]]; then
+            printf '%-16s no backup\n' "$environment"
+            continue
+        fi
+        if ! read -r created size < <(snapshot_summary "$current"); then
+            printf '%-16s current: invalid manifest\n' "$environment"
+            continue
+        fi
+        printf '%-16s current: %s  %s\n' "$environment" "$created" "$size"
     done
 }
 
