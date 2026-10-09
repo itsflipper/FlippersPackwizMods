@@ -25,6 +25,7 @@ Environment=ENABLE_RCON=true
 
 Volume=gayshitdata:/data
 Volume=%h/.config/gsr/shared/whitelist.json:/tmp/gsr-whitelist.json:ro
+Volume=%h/.config/gsr/icons/vanilla.png:/data/server-icon.png:ro
 
 [Service]
 Restart=always

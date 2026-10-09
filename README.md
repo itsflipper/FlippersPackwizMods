@@ -23,6 +23,15 @@
 
 Both environments use port `25565`; only one may run at a time.
 
+### Server icons
+
+Each environment provides its versioned `server-icon.png` in its own directory.
+During `gsr/bootstrap.sh` the icons are copied to the server-private runtime
+directory `~/.config/gsr/icons/` and mounted read-only as `/data/server-icon.png`.
+The active environment therefore identifies itself in Minecraft's multiplayer
+list. Minecraft serves that icon per active server endpoint, not per hostname:
+the same active icon is shown for both a domain and direct IP/port access.
+
 ## Server commands
 
 After bootstrap, the grouped command is the normal entry point:

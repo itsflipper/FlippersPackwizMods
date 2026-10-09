@@ -16,6 +16,7 @@ PRIVATE_CONFIG_DIR="$CONFIG_HOME/gsr"
 SHARED_DIR="$PRIVATE_CONFIG_DIR/shared"
 MASTER_WHITELIST="$SHARED_DIR/whitelist.json"
 MASTER_IDENTITIES="$SHARED_DIR/identities.json"
+ICONS_DIR="$PRIVATE_CONFIG_DIR/icons"
 
 mkdir -p "$SYSTEMD_DIR"
 
@@ -121,10 +122,30 @@ sync_private_whitelist() {
     seed_master_whitelist "$repo_path"
 }
 
+sync_environment_icons() {
+    local repo_path="$1" environment icon_source icon_target temp_icon
+
+    mkdir -p "$ICONS_DIR"
+    chmod 700 "$PRIVATE_CONFIG_DIR" "$ICONS_DIR"
+
+    for environment in "$repo_path"/$ENVIRONMENTS_DIR/*; do
+        [[ -d "$environment" ]] || continue
+        icon_source="$environment/server-icon.png"
+        [[ -f "$icon_source" ]] || continue
+        icon_target="$ICONS_DIR/$(basename "$environment").png"
+        temp_icon="$(mktemp "$ICONS_DIR/.server-icon.XXXXXX")"
+        cp "$icon_source" "$temp_icon"
+        chmod 644 "$temp_icon"
+        mv -f "$temp_icon" "$icon_target"
+        echo "    server icon: $(basename "$environment")"
+    done
+}
+
 sync_systemd() {
     local repo_path container_file environment_dir service_name link_path
     repo_path="$(cd "$1" && pwd)"
     sync_private_whitelist "$repo_path"
+    sync_environment_icons "$repo_path"
     echo "==> Linking environments + reloading systemd"
     while IFS= read -r container_file; do
         [[ -f "$container_file" ]] || continue
