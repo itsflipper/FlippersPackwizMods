@@ -117,7 +117,7 @@ prompt_sudo_password() {
 remote_command() {
     local authentication="$1" command="$2" environment="$3" remote
     valid_environment "$environment" || fail "invalid environment: $environment"
-    printf -v remote 'sudo %s -p "" -H -u %q /home/%q/.local/bin/gsr-backup %q %q' \
+    printf -v remote 'sudo %s -p "" -H -u %q /home/%q/.local/bin/gsr backup %q %q' \
         "$authentication" "$SERVICE_USER" "$SERVICE_USER" "$command" "$environment"
     ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
 }
@@ -137,7 +137,7 @@ remote_first_list() {
         fail "sudo password was not provided"
         return 1
     }
-    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr-backup list' \
+    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr backup list' \
         "$SERVICE_USER" "$SERVICE_USER"
     printf '%s\n' "$SUDO_PASSWORD" | \
         ssh -S "$CONTROL_SOCKET" -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote"
@@ -445,7 +445,7 @@ restore_server() {
 
     open_connection
     prompt_sudo_password
-    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr-backup receive-restore %q' \
+    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr backup receive-restore %q' \
         "$SERVICE_USER" "$SERVICE_USER" "$environment"
     if [[ -d "$snapshot/shared" ]]; then
         {
@@ -496,7 +496,7 @@ upload_test() {
 
     open_connection
     prompt_sudo_password
-    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr-backup receive-test %q %q' \
+    printf -v remote 'sudo -S -p "" -H -u %q /home/%q/.local/bin/gsr backup receive-test %q %q' \
         "$SERVICE_USER" "$SERVICE_USER" "$environment" "$test_volume"
     stream_snapshot_to_server "$snapshot" "$remote" Upload
     unset SUDO_PASSWORD

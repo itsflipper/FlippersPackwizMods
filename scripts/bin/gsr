@@ -15,6 +15,8 @@ Usage:
   gsr switch <environment>
   gsr rcon
   gsr properties edit
+  gsr resources status [--sample <seconds>]
+  gsr resources recommend [environment]
   gsr whitelist <command> [arguments...]
   gsr identity audit <environment>
   gsr backup <command> [arguments...]
@@ -25,6 +27,8 @@ Examples:
   gsr switch skyblock
   gsr rcon
   gsr properties edit
+  gsr resources status --sample 180
+  gsr resources recommend vanilla
   gsr whitelist audit
   gsr identity audit vanilla
   gsr backup verify vanilla
@@ -45,6 +49,10 @@ case "${1:-help}" in
     properties)
         shift
         exec "$SCRIPT_DIR/gsr-properties" "$@"
+        ;;
+    resources)
+        shift
+        exec "$SCRIPT_DIR/gsr-resources" "$@"
         ;;
     whitelist)
         shift

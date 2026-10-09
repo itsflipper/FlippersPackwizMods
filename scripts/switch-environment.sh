@@ -20,6 +20,36 @@ explicit, backed-up environment change.
 EOF
 }
 
+format_elapsed() {
+  local elapsed="$1"
+  printf '%dm %02ds' "$((elapsed / 60))" "$((elapsed % 60))"
+}
+
+run_systemctl_with_progress() {
+  local phase="$1" message="$2"
+  shift 2
+  local started_at now elapsed last_update=0 command_pid
+
+  printf '[%s] %s\n' "$phase" "$message"
+  started_at="$(date +%s)"
+  systemctl --user "$@" &
+  command_pid=$!
+  while kill -0 "$command_pid" 2>/dev/null; do
+    now="$(date +%s)"
+    elapsed=$((now - started_at))
+    if ((elapsed > 0 && elapsed - last_update >= 10)); then
+      printf '[%s] still running (%s elapsed) ...\n' "$phase" "$(format_elapsed "$elapsed")"
+      last_update="$elapsed"
+    fi
+    sleep 1
+  done
+  if ! wait "$command_pid"; then
+    printf '[%s] failed after %s.\n' "$phase" "$(format_elapsed "$(( $(date +%s) - started_at ))")" >&2
+    return 1
+  fi
+  printf '[%s] completed after %s.\n' "$phase" "$(format_elapsed "$(( $(date +%s) - started_at ))")"
+}
+
 mapfile -t ENVIRONMENTS < <(
   find "$ENVIRONMENTS_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' |
     sort
@@ -47,6 +77,52 @@ container_for() {
   local file
   file="$(container_file_for "$1")" || return 1
   sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$file" | head -n1
+}
+
+rcon_command() {
+  podman exec "$CONTAINER" sh -ceu '
+    password="$(sed -n "s/^rcon.password=//p" /data/server.properties)"
+    [ -n "$password" ] || exit 1
+    export RCON_PASSWORD="$password"
+    exec rcon-cli "$@"
+  ' sh "$@"
+}
+
+wait_for_rcon_ready() {
+  local timeout_seconds="${GSR_STARTUP_TIMEOUT_SECONDS:-900}"
+  local started_at now elapsed last_update=0
+
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || {
+    echo "GSR_STARTUP_TIMEOUT_SECONDS must be a positive number." >&2
+    return 2
+  }
+
+  printf '[start] Waiting for Minecraft and RCON readiness ...\n'
+  started_at="$(date +%s)"
+  while :; do
+    if rcon_command list >/dev/null 2>&1; then
+      printf '[start] Minecraft and RCON are ready after %s.\n' \
+        "$(format_elapsed "$(( $(date +%s) - started_at ))")"
+      return 0
+    fi
+    if ! is_active "$SERVICE"; then
+      echo '[start] Service stopped before Minecraft/RCON became ready.' >&2
+      return 1
+    fi
+    now="$(date +%s)"
+    elapsed=$((now - started_at))
+    if ((elapsed >= timeout_seconds)); then
+      printf '[start] Timed out after %s; inspect: gsr status %s\n' \
+        "$(format_elapsed "$elapsed")" "$ENVIRONMENT" >&2
+      return 1
+    fi
+    if ((elapsed > 0 && elapsed - last_update >= 10)); then
+      printf '[start] still waiting for Minecraft/RCON (%s elapsed) ...\n' \
+        "$(format_elapsed "$elapsed")"
+      last_update="$elapsed"
+    fi
+    sleep 2
+  done
 }
 
 service_exists() {
@@ -129,8 +205,20 @@ start_environment() {
     return 1
   fi
   echo "Starting $ENVIRONMENT ($SERVICE) ..."
-  systemctl --user start "$SERVICE.service"
-  systemctl --user --no-pager --full status "$SERVICE.service"
+  run_systemctl_with_progress start "Starting Quadlet service ..." start "$SERVICE.service"
+  CONTAINER="$(container_for "$ENVIRONMENT")"
+  [[ -n "$CONTAINER" ]] || { echo "Cannot determine container for $ENVIRONMENT." >&2; return 1; }
+  wait_for_rcon_ready
+}
+
+stop_environment() {
+  local environment="$1" service="$2"
+
+  printf '[pre-stop] %s: world flush and backup hooks will run.\n' "$environment"
+  run_systemctl_with_progress stop \
+    "Waiting for clean container stop and verified backup ..." \
+    stop "$service.service"
+  printf '[post-stop] %s is stopped; systemd backup hooks completed.\n' "$environment"
 }
 
 switch_environment() {
@@ -150,8 +238,8 @@ switch_environment() {
     return 0
   fi
   active_service="$(service_for "${active[0]}")"
-  echo "Stopping ${active[0]} ($active_service); its save and backup hooks will run ..."
-  systemctl --user stop "$active_service.service"
+  echo "Switching from ${active[0]} to $ENVIRONMENT ..."
+  stop_environment "${active[0]}" "$active_service"
   start_environment
 }
 
@@ -173,15 +261,20 @@ case "${1:-status}" in
   stop)
     [[ $# -eq 1 ]] || { usage >&2; exit 2; }
     require_one_active
-    echo "Stopping $ENVIRONMENT ($SERVICE); its save and backup hooks will run ..."
-    systemctl --user stop "$SERVICE.service"
+    echo "Stopping $ENVIRONMENT ($SERVICE) ..."
+    stop_environment "$ENVIRONMENT" "$SERVICE"
     ;;
   restart)
     [[ $# -eq 1 ]] || { usage >&2; exit 2; }
     require_one_active
-    echo "Restarting $ENVIRONMENT ($SERVICE); its save and backup hooks will run ..."
-    systemctl --user restart "$SERVICE.service"
-    systemctl --user --no-pager --full status "$SERVICE.service"
+    echo "Restarting $ENVIRONMENT ($SERVICE) ..."
+    printf '[pre-stop] %s: world flush and backup hooks will run.\n' "$ENVIRONMENT"
+    run_systemctl_with_progress restart \
+      "Waiting for clean restart and verified backup ..." \
+      restart "$SERVICE.service"
+    CONTAINER="$(container_for "$ENVIRONMENT")"
+    [[ -n "$CONTAINER" ]] || { echo "Cannot determine container for $ENVIRONMENT." >&2; exit 1; }
+    wait_for_rcon_ready
     ;;
   switch)
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }

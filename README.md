@@ -36,6 +36,9 @@ gsr stop
 gsr restart
 gsr rcon
 gsr properties edit
+gsr resources status
+gsr resources status --sample 180
+gsr resources recommend vanilla
 gsr whitelist list
 gsr identity audit vanilla
 gsr backup list
@@ -45,6 +48,34 @@ gsr backup list
 use `gsr switch <environment>` for the explicit, backed-up change. `gsr stop`
 and `gsr restart` always act on exactly the active environment. Bootstrap only
 installs `gsr` into the user's PATH; the older helper names remain internal.
+
+Long starts, stops, restarts and switches print their real lifecycle phases and
+elapsed wait time. A start is only reported ready after Minecraft RCON accepts
+a command; stop/restart/switch keep waiting while their clean-save and backup
+hooks complete. No artificial percentage is shown.
+
+### Resource status
+
+`gsr resources` is read-only. `status` measures the active environment and
+writes the latest private result under `~/.local/state/gsr/resources/`; it is
+not part of the repository, a volume, or a backup source. A plain status is a
+momentary snapshot. A sampled status records values across a chosen number of
+seconds (maximum 600):
+
+```bash
+gsr resources status
+gsr resources status --sample 30
+gsr resources status --sample 180
+gsr resources recommend vanilla
+```
+
+`recommend` evaluates only the last saved status for that environment and
+never changes settings. It returns exactly one result: `server stabil`,
+`besserer Test empfohlen`, or `konkrete Änderung prüfen`. The latter lists only
+fixed numeric outliers and their fixed possible change (for example JVM heap
+pressure → more `MEMORY`; CPU or host pressure → lower
+`simulation-distance`). It does not infer game causes, change limits, or make
+claims about view distance or chunk generation.
 
 ### Persistent server properties
 

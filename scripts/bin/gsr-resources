@@ -1,0 +1,534 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+REPO_ROOT="${GSR_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+ENVIRONMENTS_ROOT="$REPO_ROOT/environments"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_ROOT="$STATE_HOME/gsr/resources"
+
+MIN_STABLE_SAMPLE_SECONDS=60
+MAX_STATUS_AGE_SECONDS=86400
+MIN_VOLUME_FREE_KIB=$((10 * 1024 * 1024))
+
+usage() {
+    cat <<'EOF'
+Usage:
+  gsr resources status [--sample <seconds>]
+  gsr resources recommend [environment]
+
+status measures the currently active environment and stores its last private
+resource report under ~/.local/state/gsr/resources/. recommend only evaluates
+that last stored report; it never measures or changes server settings.
+EOF
+}
+
+fail() {
+    echo "gsr-resources: $*" >&2
+    return 1
+}
+
+environment_file() {
+    local environment="$1"
+    local files=("$ENVIRONMENTS_ROOT/$environment"/*.container)
+
+    [[ "$environment" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || return 1
+    [[ ${#files[@]} -eq 1 && -f "${files[0]}" ]] || return 1
+    printf '%s\n' "${files[0]}"
+}
+
+load_environment() {
+    local environment="$1" file
+
+    file="$(environment_file "$environment")" || {
+        fail "unknown or invalid environment: $environment"
+        return 1
+    }
+
+    RESOURCE_ENVIRONMENT="$environment"
+    RESOURCE_SERVICE="$(basename "$file" .container)"
+    RESOURCE_CONTAINER="$(sed -nE 's/^ContainerName=([^[:space:]#]+).*/\1/p' "$file" | head -n1)"
+    RESOURCE_VOLUME="$(sed -nE 's#^Volume=([^:[:space:]]+):/data(:[^[:space:]]*)?$#\1#p' "$file" | head -n1)"
+    RESOURCE_JVM_MEMORY="$(sed -nE 's/^Environment=MEMORY=([^[:space:]#]+).*/\1/p' "$file" | head -n1)"
+
+    [[ -n "$RESOURCE_CONTAINER" && -n "$RESOURCE_VOLUME" ]] || {
+        fail "cannot determine container or /data volume for $environment"
+        return 1
+    }
+}
+
+active_environment() {
+    local file environment service
+    local -a active=()
+
+    for file in "$ENVIRONMENTS_ROOT"/*/*.container; do
+        [[ -f "$file" ]] || continue
+        environment="$(basename "$(dirname "$file")")"
+        service="$(basename "$file" .container)"
+        if systemctl --user is-active --quiet "$service.service"; then
+            active+=("$environment")
+        fi
+    done
+
+    if ((${#active[@]} != 1)); then
+        if ((${#active[@]} == 0)); then
+            fail "no GSR environment is active"
+        else
+            fail "more than one GSR environment is active; refusing to guess"
+        fi
+        return 1
+    fi
+    printf '%s\n' "${active[0]}"
+}
+
+format_kib() {
+    awk -v kib="$1" 'BEGIN {
+        if (kib == "" || kib < 0) { print "unavailable"; exit }
+        if (kib >= 1048576) printf "%.2f GiB", kib / 1048576
+        else if (kib >= 1024) printf "%.1f MiB", kib / 1024
+        else printf "%d KiB", kib
+    }'
+}
+
+decimal_ge() {
+    awk -v value="$1" -v limit="$2" 'BEGIN { exit !(value + 0 >= limit + 0) }'
+}
+
+decimal_lt() {
+    awk -v value="$1" -v limit="$2" 'BEGIN { exit !(value + 0 < limit + 0) }'
+}
+
+container_stats() {
+    podman stats --no-stream \
+        --format '{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}' \
+        "$RESOURCE_CONTAINER" 2>/dev/null
+}
+
+rcon_command() {
+    podman exec "$RESOURCE_CONTAINER" sh -ceu '
+        password="$(sed -n "s/^rcon.password=//p" /data/server.properties)"
+        [ -n "$password" ] || exit 1
+        export RCON_PASSWORD="$password"
+        exec rcon-cli "$@"
+    ' sh "$@"
+}
+
+player_count() {
+    local output
+    output="$(rcon_command list 2>/dev/null || true)"
+    sed -nE 's/^There are ([0-9]+) of a max of [0-9]+ players online:.*/\1/p' <<<"$output" | head -n1
+}
+
+service_cgroup() {
+    systemctl --user show "$RESOURCE_SERVICE.service" -p ControlGroup --value 2>/dev/null || true
+}
+
+psi_avg60() {
+    local file="$1"
+    [[ -r "$file" ]] || { printf '%s\n' ""; return 0; }
+    sed -nE 's/^some .*avg60=([0-9.]+).*/\1/p' "$file" | head -n1
+}
+
+cpu_throttled_usec() {
+    local file="$1"
+    [[ -r "$file" ]] || { printf '%s\n' ""; return 0; }
+    awk '$1 == "throttled_usec" { print $2; exit }' "$file"
+}
+
+java_heap() {
+    local output line
+
+    output="$(podman exec "$RESOURCE_CONTAINER" sh -ceu '
+        command -v jcmd >/dev/null 2>&1 || exit 0
+        for proc in /proc/[0-9]*; do
+            [ -r "$proc/cmdline" ] || continue
+            command="$(tr "\\000" " " < "$proc/cmdline")"
+            case "$command" in
+                *java*) pid="${proc##*/}"; break ;;
+            esac
+        done
+        [ -n "${pid:-}" ] || exit 0
+        jcmd "$pid" GC.heap_info 2>/dev/null
+    ' 2>/dev/null || true)"
+    line="$(sed -nE 's/.*total ([0-9]+)K, used ([0-9]+)K.*/\1 \2/p' <<<"$output" | head -n1)"
+    [[ -n "$line" ]] || return 0
+    printf '%s\n' "$line"
+}
+
+collect_snapshot() {
+    local include_heap="${1:-no}" stats cgroup cgroup_root mountpoint memory_line
+
+    SNAPSHOT_CPU_PERCENT=""
+    SNAPSHOT_CONTAINER_MEMORY=""
+    SNAPSHOT_NETWORK_IO=""
+    SNAPSHOT_BLOCK_IO=""
+    SNAPSHOT_PIDS=""
+    SNAPSHOT_PLAYERS=""
+    SNAPSHOT_CPU_PRESSURE=""
+    SNAPSHOT_MEMORY_PRESSURE=""
+    SNAPSHOT_IO_PRESSURE=""
+    SNAPSHOT_THROTTLED_USEC=""
+    SNAPSHOT_HOST_MEM_AVAILABLE_KIB=""
+    SNAPSHOT_HOST_MEM_TOTAL_KIB=""
+    SNAPSHOT_SWAP_USED_KIB=""
+    SNAPSHOT_HOST_LOGICAL_CPUS=""
+    SNAPSHOT_ALLOWED_CPUS=""
+    SNAPSHOT_VOLUME_FREE_KIB=""
+    SNAPSHOT_VOLUME_TOTAL_KIB=""
+    SNAPSHOT_HEAP_TOTAL_KIB=""
+    SNAPSHOT_HEAP_USED_KIB=""
+
+    stats="$(container_stats || true)"
+    if [[ -n "$stats" ]]; then
+        IFS='|' read -r SNAPSHOT_CPU_PERCENT SNAPSHOT_CONTAINER_MEMORY SNAPSHOT_NETWORK_IO \
+            SNAPSHOT_BLOCK_IO SNAPSHOT_PIDS <<<"$stats"
+        SNAPSHOT_CPU_PERCENT="${SNAPSHOT_CPU_PERCENT%%%}"
+        SNAPSHOT_CPU_PERCENT="${SNAPSHOT_CPU_PERCENT//,/.}"
+    fi
+
+    SNAPSHOT_PLAYERS="$(player_count || true)"
+
+    cgroup="$(service_cgroup)"
+    if [[ -n "$cgroup" && -d "/sys/fs/cgroup$cgroup" ]]; then
+        cgroup_root="/sys/fs/cgroup$cgroup"
+        SNAPSHOT_CPU_PRESSURE="$(psi_avg60 "$cgroup_root/cpu.pressure")"
+        SNAPSHOT_MEMORY_PRESSURE="$(psi_avg60 "$cgroup_root/memory.pressure")"
+        SNAPSHOT_IO_PRESSURE="$(psi_avg60 "$cgroup_root/io.pressure")"
+        SNAPSHOT_THROTTLED_USEC="$(cpu_throttled_usec "$cgroup_root/cpu.stat")"
+        SNAPSHOT_ALLOWED_CPUS="$(cat "$cgroup_root/cpuset.cpus.effective" 2>/dev/null || true)"
+    fi
+
+    SNAPSHOT_HOST_MEM_TOTAL_KIB="$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo)"
+    SNAPSHOT_HOST_MEM_AVAILABLE_KIB="$(awk '/^MemAvailable:/ { print $2; exit }' /proc/meminfo)"
+    SNAPSHOT_SWAP_USED_KIB="$(awk '
+        /^SwapTotal:/ { total=$2 }
+        /^SwapFree:/ { free=$2 }
+        END { if (total != "") print total - free }
+    ' /proc/meminfo)"
+    SNAPSHOT_HOST_LOGICAL_CPUS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+
+    mountpoint="$(podman volume inspect --format '{{.Mountpoint}}' "$RESOURCE_VOLUME" 2>/dev/null || true)"
+    if [[ -n "$mountpoint" && -e "$mountpoint" ]]; then
+        read -r SNAPSHOT_VOLUME_TOTAL_KIB SNAPSHOT_VOLUME_FREE_KIB < <(
+            df -Pk "$mountpoint" | awk 'NR == 2 { print $2, $4 }'
+        )
+    fi
+
+    if [[ "$include_heap" == yes ]]; then
+        memory_line="$(java_heap || true)"
+        if [[ -n "$memory_line" ]]; then
+            read -r SNAPSHOT_HEAP_TOTAL_KIB SNAPSHOT_HEAP_USED_KIB <<<"$memory_line"
+        fi
+    fi
+}
+
+write_state() {
+    local directory="$STATE_ROOT/$RESOURCE_ENVIRONMENT" temporary
+
+    mkdir -p "$directory"
+    chmod 700 "$STATE_ROOT" "$directory"
+    umask 077
+    temporary="$(mktemp "$directory/.last-status.XXXXXX")"
+    cat > "$temporary" <<EOF
+schema_version=1
+created_at_epoch=$STATUS_CREATED_AT_EPOCH
+created_at_utc=$STATUS_CREATED_AT_UTC
+environment=$RESOURCE_ENVIRONMENT
+service=$RESOURCE_SERVICE
+container=$RESOURCE_CONTAINER
+jvm_memory=$RESOURCE_JVM_MEMORY
+sample_seconds=$STATUS_SAMPLE_SECONDS
+samples=$STATUS_SAMPLES
+players_max=$STATUS_PLAYERS_MAX
+players_available=$STATUS_PLAYERS_AVAILABLE
+container_cpu_peak_percent=$STATUS_CPU_PEAK_PERCENT
+container_cpu_last_percent=$STATUS_CPU_LAST_PERCENT
+container_memory_last=$STATUS_CONTAINER_MEMORY_LAST
+network_io_last=$STATUS_NETWORK_IO_LAST
+block_io_last=$STATUS_BLOCK_IO_LAST
+pids_last=$STATUS_PIDS_LAST
+cpu_pressure_avg60=$STATUS_CPU_PRESSURE_AVG60
+memory_pressure_avg60=$STATUS_MEMORY_PRESSURE_AVG60
+io_pressure_avg60=$STATUS_IO_PRESSURE_AVG60
+cpu_throttled_usec_delta=$STATUS_CPU_THROTTLED_USEC_DELTA
+host_mem_total_kib=$STATUS_HOST_MEM_TOTAL_KIB
+host_mem_available_kib=$STATUS_HOST_MEM_AVAILABLE_KIB
+swap_used_kib=$STATUS_SWAP_USED_KIB
+host_logical_cpus=$STATUS_HOST_LOGICAL_CPUS
+allowed_cpus=$STATUS_ALLOWED_CPUS
+volume_total_kib=$STATUS_VOLUME_TOTAL_KIB
+volume_free_kib=$STATUS_VOLUME_FREE_KIB
+heap_total_kib=$STATUS_HEAP_TOTAL_KIB
+heap_used_kib=$STATUS_HEAP_USED_KIB
+EOF
+    chmod 600 "$temporary"
+    mv -f "$temporary" "$directory/last-status.env"
+}
+
+show_status() {
+    local heap_percent=""
+
+    if [[ -n "$STATUS_HEAP_TOTAL_KIB" && "$STATUS_HEAP_TOTAL_KIB" -gt 0 ]]; then
+        heap_percent=$((STATUS_HEAP_USED_KIB * 100 / STATUS_HEAP_TOTAL_KIB))
+    fi
+
+    echo "GSR resources: $RESOURCE_ENVIRONMENT"
+    printf '  Sample: %ss (%s snapshots)\n' "$STATUS_SAMPLE_SECONDS" "$STATUS_SAMPLES"
+    printf '  Players observed: %s\n' \
+        "$([[ "$STATUS_PLAYERS_AVAILABLE" == yes ]] && printf '%s' "$STATUS_PLAYERS_MAX" || printf 'unavailable')"
+    printf '  JVM setting: %s\n' "${RESOURCE_JVM_MEMORY:-unavailable}"
+    printf '  Container CPU: peak %s%%, last %s%%\n' \
+        "${STATUS_CPU_PEAK_PERCENT:-unavailable}" "${STATUS_CPU_LAST_PERCENT:-unavailable}"
+    printf '  Logical CPUs: %s; container CPUs: %s\n' \
+        "${STATUS_HOST_LOGICAL_CPUS:-unavailable}" "${STATUS_ALLOWED_CPUS:-unlimited/unavailable}"
+    printf '  Container memory: %s\n' "${STATUS_CONTAINER_MEMORY_LAST:-unavailable}"
+    printf '  Container network I/O: %s\n' "${STATUS_NETWORK_IO_LAST:-unavailable}"
+    printf '  Container block I/O: %s\n' "${STATUS_BLOCK_IO_LAST:-unavailable}"
+    printf '  Container PIDs: %s\n' "${STATUS_PIDS_LAST:-unavailable}"
+    printf '  Host RAM available: %s / %s; swap used: %s\n' \
+        "$(format_kib "$STATUS_HOST_MEM_AVAILABLE_KIB")" \
+        "$(format_kib "$STATUS_HOST_MEM_TOTAL_KIB")" \
+        "$(format_kib "$STATUS_SWAP_USED_KIB")"
+    printf '  Volume free: %s / %s\n' \
+        "$(format_kib "$STATUS_VOLUME_FREE_KIB")" \
+        "$(format_kib "$STATUS_VOLUME_TOTAL_KIB")"
+    printf '  Pressure avg60 (CPU/RAM/I/O): %s%% / %s%% / %s%%\n' \
+        "${STATUS_CPU_PRESSURE_AVG60:-unavailable}" \
+        "${STATUS_MEMORY_PRESSURE_AVG60:-unavailable}" \
+        "${STATUS_IO_PRESSURE_AVG60:-unavailable}"
+    printf '  CPU throttled during sample: %s µs\n' \
+        "${STATUS_CPU_THROTTLED_USEC_DELTA:-unavailable}"
+    if [[ -n "$heap_percent" ]]; then
+        printf '  JVM heap: %s%% (%s / %s)\n' "$heap_percent" \
+            "$(format_kib "$STATUS_HEAP_USED_KIB")" "$(format_kib "$STATUS_HEAP_TOTAL_KIB")"
+    else
+        echo "  JVM heap: unavailable"
+    fi
+    echo "  Saved: $STATE_ROOT/$RESOURCE_ENVIRONMENT/last-status.env"
+}
+
+status() {
+    local sample_seconds="0" started_at now elapsed last_progress=0
+    local first_throttled="" last_throttled=""
+
+    if [[ $# -eq 2 && "$1" == --sample ]]; then
+        sample_seconds="$2"
+    elif [[ $# -ne 0 ]]; then
+        usage >&2
+        return 2
+    fi
+    [[ "$sample_seconds" =~ ^[0-9]+$ ]] || fail "sample seconds must be a whole number"
+    ((sample_seconds <= 600)) || fail "sample seconds must not exceed 600"
+
+    load_environment "$(active_environment)"
+    started_at="$(date +%s)"
+    STATUS_SAMPLE_SECONDS="$sample_seconds"
+    STATUS_SAMPLES=0
+    STATUS_PLAYERS_MAX=0
+    STATUS_PLAYERS_AVAILABLE=no
+    STATUS_CPU_PEAK_PERCENT=""
+
+    while :; do
+        collect_snapshot no
+        STATUS_SAMPLES=$((STATUS_SAMPLES + 1))
+        if [[ "$SNAPSHOT_PLAYERS" =~ ^[0-9]+$ ]]; then
+            STATUS_PLAYERS_AVAILABLE=yes
+            ((SNAPSHOT_PLAYERS > STATUS_PLAYERS_MAX)) && STATUS_PLAYERS_MAX="$SNAPSHOT_PLAYERS"
+        fi
+        if [[ "$SNAPSHOT_CPU_PERCENT" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            if [[ -z "$STATUS_CPU_PEAK_PERCENT" ]] || decimal_ge "$SNAPSHOT_CPU_PERCENT" "$STATUS_CPU_PEAK_PERCENT"; then
+                STATUS_CPU_PEAK_PERCENT="$SNAPSHOT_CPU_PERCENT"
+            fi
+        fi
+        [[ -z "$first_throttled" ]] && first_throttled="$SNAPSHOT_THROTTLED_USEC"
+        last_throttled="$SNAPSHOT_THROTTLED_USEC"
+
+        STATUS_CPU_LAST_PERCENT="$SNAPSHOT_CPU_PERCENT"
+        STATUS_CONTAINER_MEMORY_LAST="$SNAPSHOT_CONTAINER_MEMORY"
+        STATUS_NETWORK_IO_LAST="$SNAPSHOT_NETWORK_IO"
+        STATUS_BLOCK_IO_LAST="$SNAPSHOT_BLOCK_IO"
+        STATUS_PIDS_LAST="$SNAPSHOT_PIDS"
+        STATUS_CPU_PRESSURE_AVG60="$SNAPSHOT_CPU_PRESSURE"
+        STATUS_MEMORY_PRESSURE_AVG60="$SNAPSHOT_MEMORY_PRESSURE"
+        STATUS_IO_PRESSURE_AVG60="$SNAPSHOT_IO_PRESSURE"
+        STATUS_HOST_MEM_TOTAL_KIB="$SNAPSHOT_HOST_MEM_TOTAL_KIB"
+        STATUS_HOST_MEM_AVAILABLE_KIB="$SNAPSHOT_HOST_MEM_AVAILABLE_KIB"
+        STATUS_SWAP_USED_KIB="$SNAPSHOT_SWAP_USED_KIB"
+        STATUS_HOST_LOGICAL_CPUS="$SNAPSHOT_HOST_LOGICAL_CPUS"
+        STATUS_ALLOWED_CPUS="$SNAPSHOT_ALLOWED_CPUS"
+        STATUS_VOLUME_TOTAL_KIB="$SNAPSHOT_VOLUME_TOTAL_KIB"
+        STATUS_VOLUME_FREE_KIB="$SNAPSHOT_VOLUME_FREE_KIB"
+        STATUS_HEAP_TOTAL_KIB="$SNAPSHOT_HEAP_TOTAL_KIB"
+        STATUS_HEAP_USED_KIB="$SNAPSHOT_HEAP_USED_KIB"
+
+        now="$(date +%s)"
+        elapsed=$((now - started_at))
+        if ((elapsed >= sample_seconds)); then
+            collect_snapshot yes
+            STATUS_HEAP_TOTAL_KIB="$SNAPSHOT_HEAP_TOTAL_KIB"
+            STATUS_HEAP_USED_KIB="$SNAPSHOT_HEAP_USED_KIB"
+            break
+        fi
+        if ((elapsed - last_progress >= 10)); then
+            printf '[resources] sampling %ss / %ss ...\n' "$elapsed" "$sample_seconds"
+            last_progress="$elapsed"
+        fi
+        sleep 5
+    done
+
+    if [[ "$first_throttled" =~ ^[0-9]+$ && "$last_throttled" =~ ^[0-9]+$ ]]; then
+        STATUS_CPU_THROTTLED_USEC_DELTA=$((last_throttled - first_throttled))
+    else
+        STATUS_CPU_THROTTLED_USEC_DELTA=""
+    fi
+    STATUS_CREATED_AT_EPOCH="$(date +%s)"
+    STATUS_CREATED_AT_UTC="$(date --utc --iso-8601=seconds)"
+    write_state
+    show_status
+}
+
+load_state() {
+    local environment="$1" file key value
+    declare -gA LAST_STATUS=()
+
+    file="$STATE_ROOT/$environment/last-status.env"
+    [[ -f "$file" ]] || {
+        fail "no saved resource status for $environment; run: gsr resources status"
+        return 1
+    }
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^[a-z0-9_]+$ ]] || continue
+        LAST_STATUS["$key"]="$value"
+    done < "$file"
+    [[ "${LAST_STATUS[environment]:-}" == "$environment" ]] || {
+        fail "saved resource status does not match $environment"
+        return 1
+    }
+}
+
+append_outlier() {
+    OUTLIERS+=("$1" "$2")
+}
+
+recommend() {
+    local environment="${1:-}" now age heap_percent host_memory_percent volume_free_percent
+    local -a OUTLIERS=() reasons=()
+
+    if [[ -z "$environment" ]]; then
+        environment="$(active_environment)"
+    fi
+    load_environment "$environment"
+    load_state "$environment"
+    now="$(date +%s)"
+    age=$((now - ${LAST_STATUS[created_at_epoch]:-0}))
+
+    if [[ "${LAST_STATUS[heap_total_kib]:-}" =~ ^[0-9]+$ && "${LAST_STATUS[heap_total_kib]}" -gt 0 && \
+          "${LAST_STATUS[heap_used_kib]:-}" =~ ^[0-9]+$ ]]; then
+        heap_percent=$((LAST_STATUS[heap_used_kib] * 100 / LAST_STATUS[heap_total_kib]))
+    else
+        heap_percent=""
+    fi
+    if [[ "${LAST_STATUS[host_mem_total_kib]:-}" =~ ^[0-9]+$ && "${LAST_STATUS[host_mem_total_kib]}" -gt 0 && \
+          "${LAST_STATUS[host_mem_available_kib]:-}" =~ ^[0-9]+$ ]]; then
+        host_memory_percent=$((LAST_STATUS[host_mem_available_kib] * 100 / LAST_STATUS[host_mem_total_kib]))
+    else
+        host_memory_percent=""
+    fi
+    if [[ "${LAST_STATUS[volume_total_kib]:-}" =~ ^[0-9]+$ && "${LAST_STATUS[volume_total_kib]}" -gt 0 && \
+          "${LAST_STATUS[volume_free_kib]:-}" =~ ^[0-9]+$ ]]; then
+        volume_free_percent=$((LAST_STATUS[volume_free_kib] * 100 / LAST_STATUS[volume_total_kib]))
+    else
+        volume_free_percent=""
+    fi
+
+    if [[ -n "$heap_percent" ]] && ((heap_percent >= 85)); then
+        if [[ -n "$host_memory_percent" ]] && ((host_memory_percent < 10)); then
+            append_outlier "JVM-Heap: ${heap_percent}% belegt; Host-RAM frei: ${host_memory_percent}%." \
+                "MEMORY nicht erhöhen; simulation-distance um 2 verringern."
+        else
+            append_outlier "JVM-Heap: ${heap_percent}% belegt; Grenze: 85%." \
+                "MEMORY um 1 GiB erhöhen."
+        fi
+    fi
+    if [[ -n "$host_memory_percent" ]] && ((host_memory_percent < 10)); then
+        append_outlier "Host-RAM frei: ${host_memory_percent}%; Grenze: 10%." \
+            "simulation-distance um 2 verringern."
+    fi
+    if [[ "${LAST_STATUS[swap_used_kib]:-}" =~ ^[0-9]+$ && "${LAST_STATUS[swap_used_kib]}" -ge $((1024 * 1024)) ]]; then
+        append_outlier "Host-Swap belegt: $(format_kib "${LAST_STATUS[swap_used_kib]}"); Grenze: 1.00 GiB." \
+            "simulation-distance um 2 verringern."
+    fi
+    if [[ -n "${LAST_STATUS[cpu_pressure_avg60]:-}" ]] && decimal_ge "${LAST_STATUS[cpu_pressure_avg60]}" 5; then
+        append_outlier "CPU-Druck avg60: ${LAST_STATUS[cpu_pressure_avg60]}%; Grenze: 5%." \
+            "simulation-distance um 2 verringern."
+    fi
+    if [[ -n "${LAST_STATUS[memory_pressure_avg60]:-}" ]] && decimal_ge "${LAST_STATUS[memory_pressure_avg60]}" 1; then
+        append_outlier "RAM-Druck avg60: ${LAST_STATUS[memory_pressure_avg60]}%; Grenze: 1%." \
+            "simulation-distance um 2 verringern."
+    fi
+    if [[ -n "${LAST_STATUS[io_pressure_avg60]:-}" ]] && decimal_ge "${LAST_STATUS[io_pressure_avg60]}" 1; then
+        append_outlier "Datenträger-Druck avg60: ${LAST_STATUS[io_pressure_avg60]}%; Grenze: 1%." \
+            "Speicher-/Backup-Ziel prüfen; keine Java-RAM-Änderung vornehmen."
+    fi
+    if [[ "${LAST_STATUS[cpu_throttled_usec_delta]:-}" =~ ^[0-9]+$ && "${LAST_STATUS[cpu_throttled_usec_delta]}" -ge 500000 ]]; then
+        append_outlier "CPU-Drosselung: ${LAST_STATUS[cpu_throttled_usec_delta]} µs während der Probe." \
+            "CPU-Limit erhöhen oder entfernen."
+    fi
+    if [[ -n "$volume_free_percent" ]] && { ((volume_free_percent < 10)) || (( ${LAST_STATUS[volume_free_kib]} < MIN_VOLUME_FREE_KIB )); }; then
+        append_outlier "Volume frei: $(format_kib "${LAST_STATUS[volume_free_kib]}") (${volume_free_percent}%)." \
+            "Speicherplatz freigeben oder Backup-Ziel vergrößern."
+    fi
+
+    echo "GSR resource recommendation: $environment"
+    printf '  Last status: %s; sample: %ss\n' \
+        "${LAST_STATUS[created_at_utc]:-unknown}" "${LAST_STATUS[sample_seconds]:-unknown}"
+    if ((${#OUTLIERS[@]})); then
+        echo "  Result: konkrete Änderung prüfen"
+        local index
+        for ((index = 0; index < ${#OUTLIERS[@]}; index += 2)); do
+            printf '  - Ausreißer: %s\n    Mögliche Änderung: %s\n' \
+                "${OUTLIERS[index]}" "${OUTLIERS[index + 1]}"
+        done
+        return 0
+    fi
+
+    if ((age > MAX_STATUS_AGE_SECONDS)); then
+        reasons+=("Status ist älter als 24 Stunden")
+    fi
+    if [[ "${LAST_STATUS[sample_seconds]:-0}" =~ ^[0-9]+$ ]] && ((LAST_STATUS[sample_seconds] < MIN_STABLE_SAMPLE_SECONDS)); then
+        reasons+=("Probe ist kürzer als ${MIN_STABLE_SAMPLE_SECONDS} Sekunden")
+    fi
+    if [[ "${LAST_STATUS[players_available]:-no}" != yes ]]; then
+        reasons+=("Spielerzahl konnte nicht gelesen werden")
+    elif [[ "${LAST_STATUS[players_max]:-0}" =~ ^[0-9]+$ ]] && ((LAST_STATUS[players_max] == 0)); then
+        reasons+=("während der Probe war kein Spieler online")
+    fi
+    if ((${#reasons[@]})); then
+        echo "  Result: besserer Test empfohlen"
+        printf '  - %s\n' "${reasons[@]}"
+        echo "  Next: gsr resources status --sample 60"
+    else
+        echo "  Result: server stabil"
+        echo "  No fixed resource threshold was exceeded."
+    fi
+}
+
+case "${1:-}" in
+    status)
+        shift
+        status "$@"
+        ;;
+    recommend)
+        shift
+        [[ $# -le 1 ]] || { usage >&2; exit 2; }
+        recommend "${1:-}"
+        ;;
+    help|-h|--help|'')
+        usage
+        ;;
+    *)
+        echo "Unknown resources command: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
