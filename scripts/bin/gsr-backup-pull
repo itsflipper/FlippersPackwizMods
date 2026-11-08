@@ -305,17 +305,23 @@ rotate_snapshots() {
     old_current="$(readlink "$root/current" 2>/dev/null || true)"
     old_id="${old_current#snapshots/}"
 
-    ln -s "snapshots/$new_id" "$root/.current.new"
+    # -fnT: replace (never follow) a link left by an interrupted earlier run.
+    ln -sfnT "snapshots/$new_id" "$root/.current.new"
     mv -Tf "$root/.current.new" "$root/current"
     if [[ "$RETENTION" -ge 2 && "$old_current" == snapshots/* && -d "$snapshots/$old_id" ]]; then
-        ln -s "$old_current" "$root/.previous.new"
+        ln -sfnT "$old_current" "$root/.previous.new"
         mv -Tf "$root/.previous.new" "$root/previous"
     else
         rm -f "$root/previous"
     fi
+    # Make the renamed snapshot and the new links durable before any older
+    # snapshot is deleted (the files themselves were synced by pull).
+    sync -- "$snapshots" "$root"
     mapfile -t old < <(find "$snapshots" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -r | tail -n +$((RETENTION + 1)))
     for old_id in "${old[@]}"; do
         [[ "$old_id" == "$new_id" ]] && continue
+        # $snapshots always ends in /snapshots, so this never expands to /.
+        # shellcheck disable=SC2115
         rm -rf -- "$snapshots/$old_id"
     done
 }
@@ -362,6 +368,11 @@ PY
         fail "server backup changed during transfer; no local backup was stored"
     verify_snapshot "$stage/snapshot"
     rm -f "$stage/manifest.json"
+    # Flush every downloaded file and directory to disk before the snapshot is
+    # published and older local snapshots are rotated away, so a power loss
+    # cannot leave `current` pointing at unwritten data with the older copies
+    # already gone (as gsr-backup does on the server).
+    find "$stage/snapshot" \( -type f -o -type d \) -exec sync -- {} +
 
     new_id="$(date --utc +%Y%m%dT%H%M%SZ)-$(date --utc +%N)"
     snapshot="$snapshots/$new_id"
@@ -386,7 +397,9 @@ PY
 
 world_from_server_properties() {
     local archive="$1" entry
-    entry="$(zstd -dcq "$archive" | tar -tf - | awk '{clean=$0; sub(/^\.\//, "", clean); if (clean == "server.properties") {print $0; exit}}')"
+    # No early awk exit: with pipefail, the SIGPIPE it causes upstream would
+    # turn a successful match into a failed pipeline.
+    entry="$(zstd -dcq "$archive" | tar -tf - | awk '{clean=$0; sub(/^\.\//, "", clean); if (clean == "server.properties" && !found) {print $0; found=1}}')"
     [[ -n "$entry" ]] || return 1
     zstd -dcq "$archive" | tar -xOf - "$entry" | sed -nE 's/^level-name=([^[:space:]#]+).*/\1/p' | head -n1
 }
@@ -412,7 +425,7 @@ export_world() {
     # try to seek backwards through a stream and report false missing files.
     zstd -dcq "$archive" | tar -tf - | awk -v world="$world" '
         { clean=$0; sub(/^\.\//, "", clean); sub(/\/$/, "", clean) }
-        clean == world { print $0; exit }
+        clean == world && !found { print $0; found=1 }
     ' > "$entry_list"
     [[ -s "$entry_list" ]] || fail "world directory is not present in the archive: $world"
     if ! zstd -dcq "$archive" | tar -xf - -C "$stage" --verbatim-files-from \

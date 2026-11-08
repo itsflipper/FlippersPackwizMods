@@ -8,13 +8,32 @@ DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 BACKUP_ROOT="$DATA_HOME/gsr/backups"
 MARKER_ROOT="$STATE_HOME/gsr/backup-prepared"
+# Optional server-side settings. The only key is GSR_SERVER_BACKUP_KEEP.
+BACKUP_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/gsr/backup.conf"
+DEFAULT_SERVER_BACKUP_KEEP=1
 RESTORE_SOURCE_STAGE=""
 RESTORE_INCOMING_STAGE=""
 TEST_VOLUME=""
+RESTORE_SOURCE_KEPT=""
+# The staging directory of a create in progress, removed on exit: a failure
+# under set -e ends the script without running create_backup's RETURN trap.
+CREATE_STAGE=""
+# File descriptor of the held per-environment lock, empty when not held.
+BACKUP_LOCK_FD=""
+# How long a backup or restore waits for another one of the same environment.
+# It stays below the unit's TimeoutStopSec (900 s), so a waiting stop hook
+# fails with a message instead of being killed.
+BACKUP_LOCK_WAIT_SECONDS=600
 
 cleanup_restore_staging() {
     [[ -z "$RESTORE_SOURCE_STAGE" ]] || rm -rf -- "$RESTORE_SOURCE_STAGE"
+    [[ -z "$RESTORE_SOURCE_KEPT" ]] || \
+        echo "gsr-backup: restore did not complete; its source backup was kept at $RESTORE_SOURCE_KEPT (delete it manually once no longer needed)." >&2
     [[ -z "$RESTORE_INCOMING_STAGE" ]] || rm -rf -- "$RESTORE_INCOMING_STAGE"
+    if [[ -n "$CREATE_STAGE" ]]; then
+        rm -rf -- "$CREATE_STAGE"
+        echo "gsr-backup: backup of ${BACKUP_ENVIRONMENT:-?} FAILED (see above); its partial files were removed and the previous backups are unchanged." >&2
+    fi
     [[ -z "$TEST_VOLUME" ]] || podman volume rm "$TEST_VOLUME" >/dev/null 2>&1 || true
 }
 
@@ -64,13 +83,61 @@ Transport helpers (used by gsr-backup-pull only):
 
 prepare and finalize are systemd stop hooks. create only exports an environment
 whose container is already stopped. Each environment keeps one verified local
-backup under ~/.local/share/gsr/backups/.
+backup under ~/.local/share/gsr/backups/ by default. To keep more, put
+GSR_SERVER_BACKUP_KEEP=<1-999> (the number of snapshots per environment,
+current included) in ~/.config/gsr/backup.conf. If that file is invalid,
+backups are still made but no older backup is deleted until it is fixed.
 EOF
 }
 
 fail() {
     echo "gsr-backup: $*" >&2
     return 1
+}
+
+# Podman never inherits the lock descriptor: a long-lived helper it might
+# leave behind (such as the rootless pause process) must not keep holding the
+# lock after this script has exited.
+podman() {
+    if [[ -n "$BACKUP_LOCK_FD" ]]; then
+        command podman "$@" {BACKUP_LOCK_FD}>&-
+    else
+        command podman "$@"
+    fi
+}
+
+# Takes the per-environment lock ($BACKUP_DIR/.lock). Everything that
+# creates, rotates or restores snapshots of one environment holds it, so two
+# writers (a manual create and a stop hook, two creates, a create during a
+# restore) cannot delete each other's staging directories or snapshots. Only
+# this process holds it: it is released by release_backup_lock or on exit.
+# Never hold it across `systemctl stop`: its stop hooks take it too.
+# `systemctl start` runs no stop hook, so a restore holds it through the
+# start, and no waiting create can export a container that is being started.
+# $1 (optional) says what giving up leaves behind; the default is only true
+# when nothing has been done yet.
+acquire_backup_lock() {
+    local lock_file="$BACKUP_DIR/.lock" outcome="${1:-nothing was changed}"
+
+    [[ -z "$BACKUP_LOCK_FD" ]] || return 0
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_ROOT" "$BACKUP_DIR"
+    exec {BACKUP_LOCK_FD}>>"$lock_file"
+    if ! flock -n "$BACKUP_LOCK_FD"; then
+        echo "gsr-backup: waiting for another backup or restore of $BACKUP_ENVIRONMENT to finish ..." >&2
+        if ! flock -w "$BACKUP_LOCK_WAIT_SECONDS" "$BACKUP_LOCK_FD"; then
+            exec {BACKUP_LOCK_FD}>&-
+            BACKUP_LOCK_FD=""
+            fail "another backup or restore of $BACKUP_ENVIRONMENT still holds $lock_file after ${BACKUP_LOCK_WAIT_SECONDS} s; $outcome"
+            return 1
+        fi
+    fi
+}
+
+release_backup_lock() {
+    [[ -n "$BACKUP_LOCK_FD" ]] || return 0
+    exec {BACKUP_LOCK_FD}>&-
+    BACKUP_LOCK_FD=""
 }
 
 environment_file() {
@@ -192,17 +259,20 @@ verify_snapshot() {
     archive="$snapshot/volume.tar.zst"
     checksum="$archive.sha256"
 
+    # Every step returns explicitly: this function is also called inside
+    # $(...), where bash does not inherit set -e, so a failed check must not
+    # fall through to a later successful command.
     [[ -f "$archive" && -f "$checksum" && -f "$snapshot/manifest.json" ]] || {
         fail "snapshot is incomplete: $snapshot"
         return 1
     }
     (
-        cd "$snapshot"
+        cd "$snapshot" &&
         sha256sum --check --status "volume.tar.zst.sha256"
-    )
-    zstd -tq "$archive"
-    zstd -dcq "$archive" | tar -tf - >/dev/null
-    python3 -m json.tool "$snapshot/manifest.json" >/dev/null
+    ) || { fail "checksum mismatch: $snapshot"; return 1; }
+    zstd -tq "$archive" || { fail "zstd test failed: $archive"; return 1; }
+    zstd -dcq "$archive" | tar -tf - >/dev/null || { fail "tar listing failed: $archive"; return 1; }
+    python3 -m json.tool "$snapshot/manifest.json" >/dev/null || { fail "invalid manifest: $snapshot"; return 1; }
 }
 
 verify_snapshot_environment() {
@@ -244,18 +314,98 @@ print(f"{created}\t{value:.2f} {units[index]}")
 PY
 }
 
+# Retention value meaning "the setting is invalid: delete nothing".
+KEEP_PAUSED=0
+
+# Warns on stderr that the retention setting is unusable and prints
+# $KEEP_PAUSED: rotation is paused, every existing snapshot is kept.
+keep_setting_invalid() {
+    echo "gsr-backup: WARNING: $*. Rotation of server backups is PAUSED: the backup is still made, but no older backup is deleted until $BACKUP_CONFIG is fixed." >&2
+    printf '%s\n' "$KEEP_PAUSED"
+}
+
+# Prints GSR_SERVER_BACKUP_KEEP from $BACKUP_CONFIG, or the default (1) when
+# the file does not exist or does not set it. Anything it does not understand
+# produces a loud warning on stderr (naming the file and the bad value) and
+# prints $KEEP_PAUSED (0): an invalid setting must never stop the automatic
+# stop-hook backups, and must never delete snapshots either (falling back to
+# keep=1 would turn a typo in, say, a keep=3 file into data loss). The cost
+# is disk space: snapshots accumulate until the file is fixed.
+# Called inside $(...): it always succeeds and prints exactly one number.
+server_backup_keep() {
+    local line value="" found=false line_number=0
+
+    # Only a missing entry means "no config". A dangling symlink is a config
+    # the owner made whose target is gone: invalid, not the default (keep=1
+    # would delete the snapshots a keep=3 file was keeping).
+    if [[ ! -e "$BACKUP_CONFIG" && ! -L "$BACKUP_CONFIG" ]]; then
+        printf '%s\n' "$DEFAULT_SERVER_BACKUP_KEEP"
+        return 0
+    fi
+    if [[ -L "$BACKUP_CONFIG" && ! -e "$BACKUP_CONFIG" ]]; then
+        keep_setting_invalid "cannot read $BACKUP_CONFIG: it is a dangling symlink (its target $(readlink "$BACKUP_CONFIG") does not exist)"
+        return 0
+    fi
+    [[ -f "$BACKUP_CONFIG" && -r "$BACKUP_CONFIG" ]] || {
+        keep_setting_invalid "cannot read $BACKUP_CONFIG"
+        return 0
+    }
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_number=$((line_number + 1))
+        line="${line%%#*}"
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        if [[ "$line" =~ ^[[:space:]]*GSR_SERVER_BACKUP_KEEP[[:space:]]*=[[:space:]]*([^[:space:]]*)[[:space:]]*$ ]]; then
+            found=true
+            value="${BASH_REMATCH[1]}"
+        else
+            keep_setting_invalid "$BACKUP_CONFIG line $line_number: expected GSR_SERVER_BACKUP_KEEP=<number>, found '$line'"
+            return 0
+        fi
+    done < "$BACKUP_CONFIG"
+
+    if [[ "$found" == false ]]; then
+        printf '%s\n' "$DEFAULT_SERVER_BACKUP_KEEP"
+        return 0
+    fi
+    [[ "$value" =~ ^[1-9][0-9]{0,2}$ ]] || {
+        keep_setting_invalid "GSR_SERVER_BACKUP_KEEP in $BACKUP_CONFIG must be a whole number from 1 to 999, not '$value'"
+        return 0
+    }
+    printf '%s\n' "$value"
+}
+
+# Keeps $current plus the newest (keep - 1) other completed snapshots and
+# removes everything else in the snapshot directory, including leftover
+# staging directories. With keep=1 this removes every other directory. With
+# keep=$KEEP_PAUSED (an invalid setting) it removes nothing at all.
 remove_old_snapshots() {
-    local current="$1" snapshot
+    local current="$1" keep="$2" snapshot kept=1
+
+    (( keep != KEEP_PAUSED )) || return 0
 
     while IFS= read -r -d '' snapshot; do
         [[ "$snapshot" == "$current" ]] && continue
+        # Snapshot names start with a UTC timestamp, so a reverse name sort
+        # visits the newest first.
+        if (( kept < keep )) && [[ "$(basename "$snapshot")" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]]; then
+            kept=$((kept + 1))
+            continue
+        fi
         rm -rf -- "$snapshot"
-    done < <(find "$SNAPSHOT_DIR" -mindepth 1 -maxdepth 1 -type d -print0)
+    done < <(find "$SNAPSHOT_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z -r)
 }
 
 create_backup() {
-    local allow_running="$1" created_at snapshot_id stage archive digest archive_size current_target
+    local allow_running="$1" created_at snapshot_id stage archive digest archive_size current_target keep
+    local took_lock=false
 
+    # A restore calls this while it already holds the lock.
+    if [[ -z "$BACKUP_LOCK_FD" ]]; then
+        acquire_backup_lock
+        took_lock=true
+    fi
+    # An invalid retention setting warns and pauses rotation (keep=0).
+    keep="$(server_backup_keep)"
     command -v zstd >/dev/null || fail "zstd is required for backups."
     command -v tar >/dev/null || fail "tar is required for backups."
     podman volume exists "$BACKUP_VOLUME" || fail "Podman volume does not exist: $BACKUP_VOLUME"
@@ -270,6 +420,7 @@ create_backup() {
     created_at="$(date --utc --iso-8601=seconds)"
     snapshot_id="$(date --utc +%Y%m%dT%H%M%SZ)-$RANDOM$RANDOM"
     stage="$(mktemp -d "$SNAPSHOT_DIR/.staging.XXXXXX")"
+    CREATE_STAGE="$stage"
     archive="$stage/volume.tar.zst"
 
     cleanup_stage() {
@@ -285,17 +436,35 @@ create_backup() {
     copy_shared_identity_source "$stage/shared"
     write_manifest "$stage/manifest.json" "volume.tar.zst" "$digest" "$archive_size" "$created_at"
     verify_snapshot "$stage"
+    # Make the new snapshot durable before the previous one is deleted, so a
+    # power loss right after rotation cannot leave only unflushed data. Every
+    # regular file and directory (shared/ and its identity files too) is
+    # synced itself: syncing a directory does not flush its children.
+    find "$stage" \( -type f -o -type d \) -exec sync -- {} +
 
     current_target="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
     mv "$stage" "$SNAPSHOT_DIR/$snapshot_id"
+    CREATE_STAGE=""
     stage="$SNAPSHOT_DIR/$snapshot_id"
-    ln -s "snapshots/$snapshot_id" "$BACKUP_DIR/.current.new"
+    # -fnT: a .current.new left by an interrupted run must be replaced, not
+    # followed (plain ln -s would create the link inside the old snapshot and
+    # then point current at that old, soon-deleted snapshot).
+    ln -sfnT "snapshots/$snapshot_id" "$BACKUP_DIR/.current.new"
     mv -Tf "$BACKUP_DIR/.current.new" "$BACKUP_DIR/current"
-    remove_old_snapshots "$stage"
+    sync -- "$SNAPSHOT_DIR" "$BACKUP_DIR"
+    remove_old_snapshots "$stage" "$keep"
     trap - RETURN
+    [[ "$took_lock" == false ]] || release_backup_lock
 
     echo "gsr-backup: verified backup of $BACKUP_ENVIRONMENT is now current."
-    [[ -z "$current_target" ]] || echo "gsr-backup: replaced previous local backup."
+    if (( keep == KEEP_PAUSED )); then
+        # Repeated after the export output, so it is not missed.
+        echo "gsr-backup: WARNING: rotation is paused because $BACKUP_CONFIG is invalid; no older backup was deleted (directories in $SNAPSHOT_DIR: $(find "$SNAPSHOT_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)). Fix the file to resume rotation." >&2
+    elif (( keep == 1 )); then
+        [[ -z "$current_target" ]] || echo "gsr-backup: replaced previous local backup."
+    else
+        echo "gsr-backup: keeping up to $keep server backups of $BACKUP_ENVIRONMENT (GSR_SERVER_BACKUP_KEEP)."
+    fi
 }
 
 finalize() {
@@ -312,14 +481,24 @@ finalize() {
         return 0
     fi
 
-    # Quadlet's generated stop path ends the container through `podman rm -f`.
-    # systemd can therefore report `signal` for an intentional, clean stop.
-    # The prepared marker is only written after a successful RCON save-all
-    # flush, and a stopped container is verified above, so those are the
-    # relevant safety conditions for exporting the volume.
-    if [[ "${SERVICE_RESULT:-success}" != success ]]; then
-        echo "gsr-backup: $BACKUP_ENVIRONMENT stopped with systemd result ${SERVICE_RESULT:-unknown} after clean flush; exporting backup."
-    fi
+    # Refuse-list (round 5): only results that mean the shutdown may have been
+    # cut off mid-save (timeout, core-dump, watchdog, oom-kill) keep the
+    # previous backup; the server may have written again after the flush and
+    # then been killed, so the volume can be inconsistent even though the
+    # archive would pass every integrity check. Every other result exports as
+    # before: `signal` is normal under Quadlet (`podman rm -f`), `exit-code`
+    # can be Java exiting 143 on SIGTERM, and an unknown result must not
+    # silently skip every stop backup. Unset (run by hand) counts as success.
+    case "${SERVICE_RESULT:-success}" in
+        timeout|core-dump|watchdog|oom-kill)
+            echo "gsr-backup: WARNING: $BACKUP_ENVIRONMENT stopped abnormally (systemd result '$SERVICE_RESULT'), the shutdown may have been cut off mid-save; no backup exported, previous backup kept." >&2
+            return 0
+            ;;
+        success) ;;
+        *)
+            echo "gsr-backup: $BACKUP_ENVIRONMENT stopped with systemd result '$SERVICE_RESULT' after a clean flush; exporting backup."
+            ;;
+    esac
 
     create_backup true
 }
@@ -339,8 +518,10 @@ current_snapshot() {
     local current
 
     current="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
-    [[ -n "$current" && -d "$current" ]] || fail "no current backup for $BACKUP_ENVIRONMENT"
-    verify_snapshot "$current"
+    # Called as $(current_snapshot): set -e is not inherited there, so return
+    # explicitly instead of printing an unverified path.
+    [[ -n "$current" && -d "$current" ]] || { fail "no current backup for $BACKUP_ENVIRONMENT"; return 1; }
+    verify_snapshot "$current" || return 1
     printf '%s\n' "$current"
 }
 
@@ -399,22 +580,38 @@ restore_live_from_snapshot() {
     local environment="$1" source="$2" protected_source="" pre_restore current_before current_after
 
     load_environment "$environment"
+    # Held while the source is checked and copied, released for systemctl
+    # stop (whose stop hooks take it themselves), and re-acquired right after
+    # the stop and held through the import and systemctl start until the
+    # service runs: a waiting create must not export the volume between the
+    # stop and the start (start runs no stop hook, so this cannot deadlock).
+    acquire_backup_lock
     verify_snapshot_environment "$source" "$environment"
 
-    # The automatic stop hook rotates the one server-local snapshot. Protect a
+    # The automatic stop hook rotates server-local snapshots (with the default
+    # GSR_SERVER_BACKUP_KEEP=1, the only one away). Protect a
     # source from that snapshot directory before stopping the service.
     if [[ "$source" == "$SNAPSHOT_DIR"/* ]]; then
         protected_source="$(mktemp -d "$BACKUP_DIR/.restore-source.XXXXXX")"
+        # A partial copy is deleted on failure ...
+        RESTORE_SOURCE_STAGE="$protected_source"
         cp -a "$source/." "$protected_source/"
         source="$protected_source"
+        # ... but a complete one is kept from now on, until the restore has
+        # succeeded: every later step (the stop hook, a failing stop, the
+        # rollback backup) can rotate the original away, and then this copy
+        # is the last one of the requested restore point.
+        RESTORE_SOURCE_STAGE=""
+        RESTORE_SOURCE_KEPT="$protected_source"
     fi
 
-    RESTORE_SOURCE_STAGE="$protected_source"
     current_before="$(readlink -e "$BACKUP_DIR/current" 2>/dev/null || true)"
 
     if systemctl --user is-active --quiet "$BACKUP_SERVICE.service"; then
         echo "gsr-backup: stopping $BACKUP_ENVIRONMENT and creating a rollback backup ..."
+        release_backup_lock
         systemctl --user stop "$BACKUP_SERVICE.service"
+        acquire_backup_lock "$BACKUP_ENVIRONMENT was stopped for the restore and stays stopped; the live volume was not changed (gsr start $BACKUP_ENVIRONMENT starts it again)"
     else
         # A stopped service bypasses the stop hook, so make the rollback backup
         # explicitly before modifying the named live volume.
@@ -448,9 +645,16 @@ restore_live_from_snapshot() {
         return 1
     fi
 
-    systemctl --user start "$BACKUP_SERVICE.service"
+    # Still holding the lock: see the comment at acquire_backup_lock above.
+    # A start that fails runs ExecStopPost (finalize), which takes the lock
+    # only for a prepared stop: drop any stale marker so it cannot wait for
+    # this process (the stop above, if any, has already consumed it).
+    rm -f "$MARKER_FILE"
+    systemctl --user start "$BACKUP_SERVICE.service" {BACKUP_LOCK_FD}>&-
+    release_backup_lock
     [[ -z "$protected_source" ]] || rm -rf -- "$protected_source"
     RESTORE_SOURCE_STAGE=""
+    RESTORE_SOURCE_KEPT=""
     echo "gsr-backup: $BACKUP_ENVIRONMENT now runs from the restored volume."
     echo "gsr-backup: the current server backup is the pre-restore rollback point."
 }
